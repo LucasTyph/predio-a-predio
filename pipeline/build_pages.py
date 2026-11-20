@@ -1,7 +1,6 @@
 """Monta a pasta dist/ para o GitHub Pages a partir de site/.
 
-site/index.html é escrito no formato de página do Artifact (sem <!doctype>, <html> e <head>);
-aqui ele ganha esse esqueleto. Os dados vão no mesmo formato empacotado (.txt em base64).
+site/index.html tem só o conteúdo da página; aqui ele ganha o esqueleto HTML (doctype, head).
 
 Uso: python -I pipeline/build_pages.py
 """
@@ -24,21 +23,24 @@ SKELETON = """<!doctype html>
 """
 
 
+def pagina():
+    return SKELETON + (SITE / "index.html").read_text(encoding="utf-8") + "\n</body>\n</html>\n"
+
+
 def main():
     if DIST.exists():
         shutil.rmtree(DIST)
     DIST.mkdir()
-    page = (SITE / "index.html").read_text(encoding="utf-8")
-    (DIST / "index.html").write_text(SKELETON + page + "\n</body>\n</html>\n", encoding="utf-8")
-    n = 0
-    for src in [SITE / "data" / "meta.json", *SITE.glob("data/**/*.txt"), *SITE.glob("glyphs/**/*.txt")]:
+    (DIST / "index.html").write_text(pagina(), encoding="utf-8")
+    arquivos = [SITE / "data" / "meta.json", SITE / "data" / "busca" / "index.json",
+                *SITE.glob("data/**/*.json.gz"), *SITE.glob("glyphs/**/*.pbf"), SITE / "tiles" / "mapa.pmtiles"]
+    for src in arquivos:
         dst = DIST / src.relative_to(SITE)
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dst)
-        n += 1
     (DIST / ".nojekyll").write_text("", encoding="utf-8")
     total = sum(p.stat().st_size for p in DIST.rglob("*") if p.is_file())
-    print(f"dist/: {n + 1} arquivos, {total / 1e6:.0f} MB")
+    print(f"dist/: {len(arquivos) + 1} arquivos, {total / 1e6:.0f} MB")
 
 
 if __name__ == "__main__":

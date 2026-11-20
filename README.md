@@ -8,14 +8,20 @@ Fontes: guias de ITBI pagas (Secretaria Municipal da Fazenda), lotes, quadras, r
 
 O workflow [`.github/workflows/atualizar.yml`](.github/workflows/atualizar.yml) roda todo dia 10 (e a cada push que mexe no site ou no pipeline). Ele baixa tudo de novo, processa e publica no GitHub Pages. Para rodar na hora: aba **Actions** → **Atualizar dados e publicar** → **Run workflow**.
 
-Nenhum dado fica no repositório: as fontes somam uns 900 MB e o site gerado uns 100 MB, então o Actions recria tudo a cada execução (cerca de 15 minutos).
+Nenhum dado fica no repositório: as fontes somam uns 900 MB e o site gerado uns 140 MB, então o Actions recria tudo a cada execução (cerca de 25 minutos).
 
 ## Rodar localmente
 
 ```bash
 pip install -r requirements.txt
-python -I pipeline/atualizar.py --pages   # baixa as fontes e monta site/data e dist/
+python -I pipeline/atualizar.py --pages   # baixa as fontes e monta site/ e dist/
 python -I pipeline/serve.py                # http://localhost:8765
+```
+
+O passo dos tiles precisa do [tippecanoe](https://github.com/felt/tippecanoe) 2.x (`apt install tippecanoe` no Ubuntu). No Windows ele roda pelo WSL: extraia o pacote sem precisar de root (`apt-get download tippecanoe && dpkg -x tippecanoe_*.deb ~/tippe`) e aponte o pipeline para ele:
+
+```powershell
+$env:TIPPECANOE_PREFIX = "wsl.exe -d Ubuntu-24.04 -- /home/<usuario>/tippe/usr/bin/"
 ```
 
 Passos do pipeline, na ordem (`atualizar.py` chama todos):
@@ -27,11 +33,17 @@ Passos do pipeline, na ordem (`atualizar.py` chama todos):
 | `download_lotes.py` | Lotes fiscais do GeoSampa, um CSV por setor fiscal (WFS) |
 | `download_base.py` | Quadras, ruas, distritos e metrô do GeoSampa |
 | `parse_itbi.py` | Junta as planilhas numa tabela só (`data/interim/itbi.parquet`) |
-| `build_site_data.py` | Agrupa as vendas por edifício e gera `site/data/` |
-| `pack_site.py` | Empacota os arquivos comprimidos como base64 `.txt` |
+| `build_site_data.py` | Agrupa as vendas por edifício: `site/data/setor/` (vendas), `site/data/busca/` (índice de busca) e as camadas do mapa em `data/tiles_src/` |
+| `build_tiles.py` | Gera o mapa em tiles vetoriais (`site/tiles/mapa.pmtiles`) com o tippecanoe |
 | `build_pages.py` | Monta `dist/` para o GitHub Pages |
 
-`site/index.html` é a página inteira (mapa em MapLibre, sem servidor). Ela também pode ser publicada como Artifact do Claude, por isso não tem `<head>` próprio; `build_pages.py` acrescenta o esqueleto HTML.
+`site/index.html` é a página inteira (mapa em MapLibre, sem servidor); `build_pages.py` acrescenta o esqueleto HTML.
+
+## O que o navegador baixa
+
+- **Mapa:** `tiles/mapa.pmtiles` (~70 MB) fica inteiro no servidor, mas o navegador pede só os tiles da área visível, com requisições HTTP Range. Abrir no Tatuapé baixa uns 300 KB de tiles; a cidade inteira, uns 1–2 MB.
+- **Vendas:** um arquivo por setor fiscal (`data/setor/XXX.json.gz`, 50–900 KB), baixado só ao abrir um prédio daquele setor.
+- **Busca:** o índice é dividido pelas 2 ou 3 primeiras letras de cada palavra do endereço, do nome do prédio e do bairro (`data/busca/XX.json.gz`). Cada busca baixa só o arquivo da palavra mais longa digitada, em geral 20–150 KB.
 
 ## Como as vendas viram "edifícios"
 

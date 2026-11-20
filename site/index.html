@@ -234,6 +234,7 @@ dialog .close { float: right; }
 </dialog>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/4.7.1/maplibre-gl.js"></script>
+<script src="https://unpkg.com/pmtiles@4.3.0/dist/pmtiles.js"></script>
 <script>
 "use strict";
 // ------------------------------------------------------------------ util
@@ -256,23 +257,11 @@ function prettyAddr(e) {
   const ab = { R: "R.", AV: "Av.", AL: "Al.", PC: "Pç.", TV: "Tv.", EST: "Estr.", VD: "Vd.", LG: "Lgo.", PQ: "Pq.", PRC: "Pç.", ROD: "Rod.", VL: "Vila", PCA: "Pç." };
   return (ab[m[1]] || titleCase(m[1])) + " " + titleCase(m[2]);
 }
-// Os arquivos grandes são gzip em base64 (.txt), porque o Artifact só serve tipos web comuns.
-async function getPacked(path) {
+// Os arquivos .json.gz são servidos como binário e descomprimidos aqui.
+async function getJSON(path) {
   const r = await fetch(BASE + path);
   if (!r.ok) throw new Error(`${path}: HTTP ${r.status}`);
-  const bin = atob((await r.text()).trim());
-  const buf = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
-  return buf;
-}
-async function getJSON(path) {
-  let buf;
-  if (path.endsWith(".txt")) buf = await getPacked(path);
-  else {
-    const r = await fetch(BASE + path);
-    if (!r.ok) throw new Error(`${path}: HTTP ${r.status}`);
-    buf = new Uint8Array(await r.arrayBuffer());
-  }
+  const buf = new Uint8Array(await r.arrayBuffer());
   if (buf[0] === 0x1f && buf[1] === 0x8b) {
     const stream = new Blob([buf]).stream().pipeThrough(new DecompressionStream("gzip"));
     return JSON.parse(await new Response(stream).text());
@@ -317,22 +306,17 @@ const deflate = (v, d) => {
 };
 
 // ------------------------------------------------------------------ mapa
-const METRO_CORES = { AZUL: "#0455a1", VERDE: "#007e5e", VERMELHA: "#ee372f", AMARELA: "#ffd400", "LILÁS": "#9b3894", LILAS: "#9b3894", PRATA: "#9e9e9e", OURO: "#c9a227", LARANJA: "#f68b1f" };
+// O mapa base vem de tiles vetoriais (tiles/mapa.pmtiles): o navegador pede só os pedaços da
+// área visível, com requisições HTTP Range. As vendas de cada setor só são baixadas ao abrir um prédio.
+const protocol = new pmtiles.Protocol();
+maplibregl.addProtocol("pmtiles", protocol.tile);
+const TILES_URL = "pmtiles://" + BASE + "tiles/mapa.pmtiles";
 function rampColors() { return ["--s1", "--s2", "--s3", "--s4", "--s5", "--s6", "--s7"].map(css); }
 function stepExpr(prop, fallback) {
   const c = rampColors();
   const e = ["step", ["get", prop], c[0]];
   state.breaks.forEach((b, i) => e.push(b, c[i + 1]));
-  return ["case", ["==", ["get", prop], null], fallback, e];
-}
-function computeBreaks(quadras) {
-  const vals = quadras.features.map((f) => f.properties.m2).filter((v) => v != null && quadras).sort((a, b) => a - b);
-  const qs = [1, 2, 3, 4, 5, 6].map((i) => vals[Math.floor((vals.length * i) / 7)]);
-  const nice = (v) => v < 5000 ? Math.round(v / 250) * 250 : Math.round(v / 500) * 500;
-  const out = [];
-  qs.forEach((v) => { const n = nice(v); if (!out.length || n > out[out.length - 1]) out.push(n); });
-  while (out.length < 6) out.push(out[out.length - 1] + 1000);
-  state.breaks = out;
+  return ["case", ["has", prop], e, fallback];
 }
 function renderLegend() {
   const c = rampColors();
@@ -344,67 +328,46 @@ function renderLegend() {
     <div class="nd"><i></i>sem vendas recentes</div>`;
   el.hidden = false;
 }
-function districtLabels(gj) {
-  const feats = [];
-  for (const f of gj.features) {
-    const g = f.geometry;
-    const polys = g.type === "Polygon" ? [g.coordinates] : g.coordinates;
-    let best = null, bestA = 0;
-    for (const p of polys) {
-      const r = p[0]; let a = 0, cx = 0, cy = 0;
-      for (let i = 0, j = r.length - 1; i < r.length; j = i++) {
-        const k = r[j][0] * r[i][1] - r[i][0] * r[j][1]; a += k; cx += (r[j][0] + r[i][0]) * k; cy += (r[j][1] + r[i][1]) * k;
-      }
-      if (Math.abs(a) > bestA) { bestA = Math.abs(a); best = [cx / (3 * a), cy / (3 * a)]; }
-    }
-    if (best) feats.push({ type: "Feature", geometry: { type: "Point", coordinates: best }, properties: { n: titleCase(f.properties.nm_distrito_municipal) } });
-  }
-  return { type: "FeatureCollection", features: feats };
-}
+const RAIO = (k) => ["interpolate", ["linear"], ["zoom"],
+  13, ["+", k, ["interpolate", ["linear"], ["get", "n"], 1, 1.2, 30, 2.4, 300, 4.5]],
+  14, ["+", k, ["interpolate", ["linear"], ["get", "n"], 1, 1.6, 30, 3.2, 300, 6]],
+  17, ["+", k, ["interpolate", ["linear"], ["get", "n"], 1, 4, 30, 7, 300, 13]]];
 function styleFor() {
-  const bg = css("--bg"), nod = css("--nodata"), fg = css("--fg"), muted = css("--muted"), panel = css("--panel"), line = css("--line");
+  const bg = css("--bg"), nod = css("--nodata"), fg = css("--fg"), muted = css("--muted"), panel = css("--panel"), line = css("--line"), sel = css("--select");
+  const src = { source: "mapa" };
+  const label = (layer, minzoom, maxzoom, size, spacing) => ({
+    id: layer + "-lab", type: "symbol", ...src, "source-layer": layer, minzoom, maxzoom,
+    layout: { "symbol-placement": "line", "text-field": ["get", "n"], "text-font": ["sans"], "text-size": size, "text-max-angle": 30, "symbol-spacing": spacing },
+    paint: { "text-color": muted, "text-halo-color": bg, "text-halo-width": 1.4 } });
   return {
     version: 8,
-    glyphs: "packed://glyphs/{fontstack}/{range}",
+    glyphs: BASE + "glyphs/{fontstack}/{range}.pbf",
     sources: {
-      quadras: { type: "geojson", data: { type: "FeatureCollection", features: [] }, tolerance: 0.3 },
-      ruas: { type: "geojson", data: { type: "FeatureCollection", features: [] } },
-      distritos: { type: "geojson", data: { type: "FeatureCollection", features: [] } },
-      distlabels: { type: "geojson", data: { type: "FeatureCollection", features: [] } },
-      metro: { type: "geojson", data: { type: "FeatureCollection", features: [] } },
-      metrolinhas: { type: "geojson", data: { type: "FeatureCollection", features: [] } },
-      edificios: { type: "geojson", data: { type: "FeatureCollection", features: [] } },
-      sel: { type: "geojson", data: { type: "FeatureCollection", features: [] } },
+      mapa: { type: "vector", url: TILES_URL, attribution: "Dados: Prefeitura de São Paulo (ITBI, GeoSampa)" },
     },
     layers: [
       { id: "bg", type: "background", paint: { "background-color": bg } },
-      { id: "quadras", type: "fill", source: "quadras", paint: {
-        "fill-color": ["interpolate", ["linear"], ["zoom"], 13.8, stepExpr("m2", nod), 14.8, nod],
-        "fill-antialias": true } },
-      { id: "quadras-line", type: "line", source: "quadras", minzoom: 15.5, paint: { "line-color": line, "line-width": 0.6 } },
-      { id: "distritos", type: "line", source: "distritos", paint: { "line-color": muted, "line-width": ["interpolate", ["linear"], ["zoom"], 10, 0.4, 14, 1.2], "line-opacity": 0.55, "line-dasharray": [3, 2] } },
-      { id: "metrolinhas", type: "line", source: "metrolinhas", paint: { "line-color": ["coalesce", ["get", "cor"], "#888"], "line-width": ["interpolate", ["linear"], ["zoom"], 10, 1.5, 15, 4], "line-opacity": 0.9 } },
-      { id: "sel-fill", type: "fill", source: "sel", paint: { "fill-color": css("--select"), "fill-opacity": 0.35 } },
-      { id: "sel-line", type: "line", source: "sel", paint: { "line-color": css("--select"), "line-width": 2.5 } },
-      { id: "edificios", type: "circle", source: "edificios", minzoom: 14, paint: {
-        "circle-radius": ["interpolate", ["linear"], ["zoom"], 14, ["interpolate", ["linear"], ["get", "n"], 1, 1.6, 30, 3.2, 300, 6], 17, ["interpolate", ["linear"], ["get", "n"], 1, 4, 30, 7, 300, 13]],
+      { id: "quadras", type: "fill", ...src, "source-layer": "quadras", paint: {
+        "fill-color": ["interpolate", ["linear"], ["zoom"], 13.8, stepExpr("m2", nod), 14.8, nod] } },
+      { id: "quadras-line", type: "line", ...src, "source-layer": "quadras", minzoom: 15.5, paint: { "line-color": line, "line-width": 0.6 } },
+      { id: "distritos", type: "line", ...src, "source-layer": "distritos", paint: { "line-color": muted, "line-width": ["interpolate", ["linear"], ["zoom"], 10, 0.4, 14, 1.2], "line-opacity": 0.55, "line-dasharray": [3, 2] } },
+      { id: "metrolinhas", type: "line", ...src, "source-layer": "metro_linhas", paint: { "line-color": ["coalesce", ["get", "cor"], "#888"], "line-width": ["interpolate", ["linear"], ["zoom"], 10, 1.5, 15, 4], "line-opacity": 0.9 } },
+      { id: "sel-fill", type: "fill", ...src, "source-layer": "lotes", filter: ["==", ["get", "id"], -1], paint: { "fill-color": sel, "fill-opacity": 0.35 } },
+      { id: "sel-line", type: "line", ...src, "source-layer": "lotes", filter: ["==", ["get", "id"], -1], paint: { "line-color": sel, "line-width": 2.5 } },
+      { id: "edificios", type: "circle", ...src, "source-layer": "edificios", paint: {
+        "circle-radius": RAIO(0),
         "circle-color": stepExpr("m2", muted),
-        "circle-stroke-color": fg, "circle-stroke-opacity": 0.45, "circle-stroke-width": ["interpolate", ["linear"], ["zoom"], 14, 0.4, 17, 1],
-        "circle-opacity": ["interpolate", ["linear"], ["zoom"], 14, 0.6, 15, 1] } },
-      { id: "edificios-sel", type: "circle", source: "edificios", filter: ["==", ["get", "id"], -1], paint: {
-        "circle-radius": ["interpolate", ["linear"], ["zoom"], 14, ["+", 4, ["interpolate", ["linear"], ["get", "n"], 1, 1.6, 30, 3.2, 300, 6]], 17, ["+", 4, ["interpolate", ["linear"], ["get", "n"], 1, 4, 30, 7, 300, 13]]],
-        "circle-color": "rgba(0,0,0,0)", "circle-stroke-color": css("--select"), "circle-stroke-width": 3 } },
-      { id: "metro", type: "circle", source: "metro", minzoom: 11, paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], 11, 3, 16, 6], "circle-color": panel, "circle-stroke-color": fg, "circle-stroke-width": 1.5 } },
-      { id: "ruas-lab", type: "symbol", source: "ruas", minzoom: 15.3, layout: {
-        "symbol-placement": "line", "text-field": ["get", "n"], "text-font": ["sans"], "text-size": 11, "text-max-angle": 30, "symbol-spacing": 280 },
-        paint: { "text-color": muted, "text-halo-color": bg, "text-halo-width": 1.4 } },
-      { id: "avs-lab", type: "symbol", source: "ruas", minzoom: 13.2, maxzoom: 15.3, filter: ["==", ["get", "r"], 1], layout: {
-        "symbol-placement": "line", "text-field": ["get", "n"], "text-font": ["sans"], "text-size": 11, "text-max-angle": 30, "symbol-spacing": 400 },
-        paint: { "text-color": muted, "text-halo-color": bg, "text-halo-width": 1.4 } },
-      { id: "metro-lab", type: "symbol", source: "metro", minzoom: 12.5, layout: {
+        "circle-stroke-color": fg, "circle-stroke-opacity": 0.45, "circle-stroke-width": ["interpolate", ["linear"], ["zoom"], 13, 0.3, 17, 1],
+        "circle-opacity": ["interpolate", ["linear"], ["zoom"], 13, 0.55, 15, 1] } },
+      { id: "edificios-sel", type: "circle", ...src, "source-layer": "edificios", filter: ["==", ["get", "id"], -1], paint: {
+        "circle-radius": RAIO(4), "circle-color": "rgba(0,0,0,0)", "circle-stroke-color": sel, "circle-stroke-width": 3 } },
+      { id: "metro", type: "circle", ...src, "source-layer": "metro_estacoes", paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], 11, 3, 16, 6], "circle-color": panel, "circle-stroke-color": fg, "circle-stroke-width": 1.5 } },
+      label("ruas", 15.3, 24, 11, 280),
+      label("avenidas", 13.2, 24, 11, 400),
+      { id: "metro-lab", type: "symbol", ...src, "source-layer": "metro_estacoes", minzoom: 12.5, layout: {
         "text-field": ["get", "n"], "text-font": ["sans"], "text-size": 11.5, "text-offset": [0, 1.1], "text-anchor": "top", "text-optional": true },
         paint: { "text-color": fg, "text-halo-color": panel, "text-halo-width": 1.6 } },
-      { id: "dist-lab", type: "symbol", source: "distlabels", maxzoom: 13.5, layout: {
+      { id: "dist-lab", type: "symbol", ...src, "source-layer": "distritos_rotulo", maxzoom: 13.5, layout: {
         "text-field": ["get", "n"], "text-font": ["sans"], "text-size": ["interpolate", ["linear"], ["zoom"], 10, 10.5, 13, 13], "text-transform": "uppercase", "text-letter-spacing": 0.08, "text-max-width": 8 },
         paint: { "text-color": fg, "text-halo-color": bg, "text-halo-width": 1.8, "text-opacity": 0.85 } },
     ],
@@ -413,117 +376,56 @@ function styleFor() {
 
 function setStatus(t) { const el = $("#status"); el.textContent = t || ""; el.hidden = !t; }
 
-let baseData = {};
-maplibregl.addProtocol("packed", async (params) => {
-  const path = params.url.replace("packed://", "") + ".txt";
-  const buf = await getPacked(path);
-  return { data: buf.buffer };
-});
 async function initMap() {
   const start = store.get("view");
   let center = [-46.5745, -23.5405], zoom = 14.6; // Tatuapé
   if (start) { try { const v = JSON.parse(start); center = v.c; zoom = v.z; } catch { /* ignora */ } }
-  // baixa as camadas base enquanto o mapa inicializa
-  const baseP = Promise.all([getJSON("data/quadras.txt"), getJSON("data/distritos.txt")]);
-  const ruasP = getJSON("data/ruas.txt");
-  baseP.catch(() => {}); ruasP.catch(() => {});
   const map = new maplibregl.Map({
-    container: "map", style: styleFor(), center, zoom, minZoom: 9.5, maxZoom: 18.5,
+    container: "map", style: styleFor(), center, zoom, minZoom: 10, maxZoom: 18.5,
     maxBounds: [[-47.05, -24.1], [-46.2, -23.3]], attributionControl: false, dragRotate: false, pitchWithRotate: false,
   });
   map.touchZoomRotate.disableRotation();
   map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
-  map.addControl(new maplibregl.AttributionControl({ compact: true, customAttribution: "Dados: Prefeitura de São Paulo (ITBI, GeoSampa)" }));
+  map.addControl(new maplibregl.AttributionControl({ compact: true }));
   state.map = map;
-  await new Promise((res) => map.on("load", res));
-
-  setStatus("Carregando quadras…");
-  const [quadras, dist] = await baseP;
-  computeBreaks(quadras);
-  map.setPaintProperty("quadras", "fill-color", ["interpolate", ["linear"], ["zoom"], 13.8, stepExpr("m2", css("--nodata")), 14.8, css("--nodata")]);
-  map.setPaintProperty("edificios", "circle-color", stepExpr("m2", css("--muted")));
-  baseData = { quadras, dist };
-  for (const f of quadras.features) {
-    const s = f.properties.s; const r = f.geometry.type === "Polygon" ? f.geometry.coordinates[0] : f.geometry.coordinates[0][0];
-    const b = state.setorBBox[s] || (state.setorBBox[s] = [180, 90, -180, -90]);
-    for (const [x, y] of r) { if (x < b[0]) b[0] = x; if (y < b[1]) b[1] = y; if (x > b[2]) b[2] = x; if (y > b[3]) b[3] = y; }
-  }
-  applyBase();
   renderLegend();
-  setStatus("");
-  ruasP.then((r) => { baseData.ruas = r; map.getSource("ruas").setData(r); }).catch(() => {});
-
-  map.on("moveend", () => { store.set("view", JSON.stringify({ c: map.getCenter().toArray(), z: map.getZoom() })); loadVisible(); });
+  map.on("moveend", () => store.set("view", JSON.stringify({ c: map.getCenter().toArray(), z: map.getZoom() })));
   map.on("click", "edificios", (e) => { const f = e.features[0]; if (f) selectBuilding(f.properties.s, f.properties.id, { fly: false }); });
   map.on("mouseenter", "edificios", () => (map.getCanvas().style.cursor = "pointer"));
   map.on("mouseleave", "edificios", () => (map.getCanvas().style.cursor = ""));
-  map.on("click", "quadras", (e) => { if (map.getZoom() < 14) map.easeTo({ center: e.lngLat, zoom: 15 }); });
-  loadVisible();
-}
-function applyBase() {
-  const map = state.map; const { quadras, dist } = baseData;
-  map.getSource("quadras").setData(quadras);
-  if (dist.distrito_municipal) { map.getSource("distritos").setData(dist.distrito_municipal); map.getSource("distlabels").setData(districtLabels(dist.distrito_municipal)); }
-  if (dist.estacao_metro) map.getSource("metro").setData({ type: "FeatureCollection", features: dist.estacao_metro.features.map((f) => ({ ...f, properties: { n: titleCase(f.properties.nm_estacao_metro_trem) } })) });
-  if (dist.linha_metro) map.getSource("metrolinhas").setData({ type: "FeatureCollection", features: dist.linha_metro.features.map((f) => {
-    const p = f.properties; const nome = Object.values(p).find((v) => typeof v === "string" && METRO_CORES[v.toUpperCase().replace(/^LINHA\s*\d*\s*-?\s*/, "")]);
-    return { ...f, properties: { cor: nome ? METRO_CORES[nome.toUpperCase().replace(/^LINHA\s*\d*\s*-?\s*/, "")] : null } };
-  }) });
+  map.on("click", "quadras", (e) => { if (map.getZoom() < 13) map.easeTo({ center: e.lngLat, zoom: 15 }); });
+  map.on("error", (e) => { if (/pmtiles|Range/i.test(String(e.error?.message))) setStatus("Não foi possível carregar o mapa. Recarregue a página."); });
+  await new Promise((res) => map.on("load", res));
+  setStatus("");
 }
 // Ao trocar o tema, refaz o estilo com as cores novas.
 new MutationObserver(restyle).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
 function restyle() {
-  const map = state.map; if (!map || !baseData.quadras) return;
+  const map = state.map; if (!map) return;
   map.setStyle(styleFor());
-  map.once("styledata", () => {
-    applyBase(); if (baseData.ruas) map.getSource("ruas").setData(baseData.ruas);
-    refreshBuildingsSource(); renderLegend(); if (state.selected) highlight(state.selected);
-  });
+  map.once("styledata", () => { renderLegend(); if (state.selected) highlight(state.selected); });
 }
 
-function visibleSetores() {
-  const b = state.map.getBounds(); const out = [];
-  for (const [s, bb] of Object.entries(state.setorBBox)) if (bb[0] <= b.getEast() && bb[2] >= b.getWest() && bb[1] <= b.getNorth() && bb[3] >= b.getSouth()) out.push(s);
-  return out;
-}
-async function loadVisible() {
-  if (!state.map || state.map.getZoom() < 13.8) return;
-  const ss = visibleSetores().filter((s) => !state.loaded.has(s));
-  if (ss.length > 16) return;
-  await Promise.all(ss.map(loadSetor));
-}
 function loadSetor(s) {
   if (state.loaded.has(s)) return Promise.resolve(state.loaded.get(s));
   if (state.loading.has(s)) return state.loading.get(s);
-  setStatus("Carregando vendas da região…");
-  const p = getJSON(`data/setor/${s}.txt`).then((d) => {
+  const p = getJSON(`data/setor/${s}.json.gz`).then((d) => {
     for (const e of d.ed) { e.setor = s; state.byId.set(e.id, e); }
     state.loaded.set(s, d); state.loading.delete(s);
-    refreshBuildingsSource();
-    if (!state.loading.size) setStatus("");
     return d;
-  }).catch((err) => { state.loading.delete(s); setStatus("Não foi possível carregar esta região. Mova o mapa para tentar de novo."); throw err; });
+  }).catch((err) => { state.loading.delete(s); throw err; });
   state.loading.set(s, p);
   return p;
 }
-let refreshTimer = 0;
-function refreshBuildingsSource() {
-  clearTimeout(refreshTimer);
-  refreshTimer = setTimeout(() => {
-    const feats = [];
-    for (const d of state.loaded.values()) for (const e of d.ed) feats.push({ type: "Feature", geometry: { type: "Point", coordinates: [e.lon, e.lat] }, properties: { id: e.id, s: e.setor, n: e.s.length, m2: e.m2 } });
-    state.map.getSource("edificios")?.setData({ type: "FeatureCollection", features: feats });
-  }, 30);
-}
 function highlight(e) {
   const map = state.map; if (!map || !map.getLayer("edificios-sel")) return;
-  try {
-    map.getSource("sel").setData(e.poly ? { type: "Feature", geometry: { type: "Polygon", coordinates: [e.poly] }, properties: {} } : { type: "FeatureCollection", features: [] });
-    map.setFilter("edificios-sel", ["==", ["get", "id"], e.id]);
-  } catch { /* estilo ainda carregando; main() chama de novo */ }
+  const f = ["==", ["get", "id"], e.id];
+  for (const id of ["sel-fill", "sel-line", "edificios-sel"]) map.setFilter(id, f);
 }
 
 // ------------------------------------------------------------------ busca
+// O índice é dividido pelo começo das palavras (data/busca/XX.json.gz ou XXX.json.gz): a busca
+// baixa só o arquivo da palavra mais longa digitada.
 const ABBR = { RUA: "R", AVENIDA: "AV", ALAMEDA: "AL", PRACA: "PC", TRAVESSA: "TV", ESTRADA: "EST", LARGO: "LG", VIELA: "VL", EDIFICIO: "ED", EDIF: "ED",
   CONDOMINIO: "COND", RESIDENCIAL: "RES", DOUTOR: "DR", DOUTORA: "DRA", PROFESSOR: "PROF", PROFESSORA: "PROFA", GENERAL: "GAL", CORONEL: "CEL", BARAO: "BR",
   PADRE: "PE", PRESIDENTE: "PRES", ENGENHEIRO: "ENG", DEPUTADO: "DEP", SENADOR: "SEN", MARECHAL: "MAL", ALMIRANTE: "ALM", VEREADOR: "VER", CAPITAO: "CAP",
@@ -531,37 +433,39 @@ const ABBR = { RUA: "R", AVENIDA: "AV", ALAMEDA: "AL", PRACA: "PC", TRAVESSA: "T
 const normTxt = (s) => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase().replace(/[^A-Z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
 const normQuery = (s) => normTxt(s).split(" ").filter(Boolean).map((w) => ABBR[w] || w);
 const STOP = new Set(["DE", "DA", "DO", "DAS", "DOS", "E", "N", "NO", "NUM"]);
-async function ensureBusca() {
-  if (state.busca) return;
-  if (state.buscaP) return state.buscaP;
-  state.buscaP = getJSON("data/busca.txt").then((b) => {
-    state.busca = b;
-    state.buscaNorm = b.map((r) => " " + normTxt(`${r[4]} ${r[5]} ${r[6]}`) + " ");
-  });
-  return state.buscaP;
+const busca = { index: null, shards: new Map() };
+function buscaIndex() {
+  if (!busca.index) busca.index = getJSON("data/busca/index.json").then((d) => new Set(d.split)).catch((err) => { busca.index = null; throw err; });
+  return busca.index;
 }
-function search(q) {
-  const toks = normQuery(q).filter((t) => !STOP.has(t));
-  if (!toks.length || !state.busca) return [];
-  const nums = toks.filter((t) => /^\d+$/.test(t)), words = toks.filter((t) => !/^\d+$/.test(t));
-  const out = [];
-  const H = state.buscaNorm, B = state.busca;
-  for (let i = 0; i < H.length; i++) {
-    const h = H[i]; let ok = true;
-    for (const w of words) if (h.indexOf(" " + w) < 0) { ok = false; break; }
-    if (!ok) continue;
-    for (const n of nums) if (h.indexOf(" " + n + " ") < 0) { ok = false; break; }
-    if (!ok) continue;
-    const r = B[i];
-    const addr = " " + normTxt(r[4]) + " ";
-    let score = r[7];
-    if (nums.length && addr.indexOf(" " + nums[0] + " ") >= 0) score += 1e6;
-    if (words.every((w) => addr.indexOf(" " + w) >= 0)) score += 5e5;
-    out.push([score, i]);
-    if (out.length > 4000) break;
+async function buscaShard(word) {
+  const split = await buscaIndex();
+  const key = split.has(word.slice(0, 2)) ? word.slice(0, 3) : word.slice(0, 2);
+  if (!busca.shards.has(key)) {
+    busca.shards.set(key, getJSON(`data/busca/${key}.json.gz`)
+      .then((rows) => rows.map((r) => ({ r, h: " " + normTxt(`${r[4]} ${r[5]} ${r[6]}`) + " ", a: " " + normTxt(r[4]) + " " })))
+      .catch((err) => { if (/404/.test(err.message)) return []; busca.shards.delete(key); throw err; }));
   }
-  out.sort((a, b) => b[0] - a[0]);
-  return out.slice(0, 12).map(([, i]) => B[i]);
+  return busca.shards.get(key);
+}
+// null = consulta curta demais para buscar
+async function search(q) {
+  const toks = normQuery(q).filter((t) => !STOP.has(t));
+  const nums = toks.filter((t) => /^\d+$/.test(t)), words = toks.filter((t) => !/^\d+$/.test(t));
+  const chave = words.filter((w) => w.length >= 3).sort((a, b) => b.length - a.length)[0];
+  if (!chave) return null;
+  const rows = await buscaShard(chave);
+  const out = [];
+  for (const { r, h, a } of rows) {
+    if (!words.every((w) => h.indexOf(" " + w) >= 0)) continue;
+    if (!nums.every((n) => h.indexOf(" " + n + " ") >= 0)) continue;
+    let score = r[7];
+    if (nums.length && a.indexOf(" " + nums[0] + " ") >= 0) score += 1e6;
+    if (words.every((w) => a.indexOf(" " + w) >= 0)) score += 5e5;
+    out.push([score, r]);
+  }
+  out.sort((x, y) => y[0] - x[0]);
+  return out.slice(0, 12).map(([, r]) => r);
 }
 let activeIdx = -1, lastResults = [];
 function renderResults(rs) {
@@ -576,16 +480,22 @@ function pickResult(r) {
   selectBuilding(r[1], r[0], { fly: true, lat: r[2], lon: r[3] });
 }
 let qTimer = 0;
-$("#q").addEventListener("focus", () => ensureBusca());
+$("#q").addEventListener("focus", () => buscaIndex().catch(() => {}));
 $("#q").addEventListener("input", (ev) => {
   clearTimeout(qTimer);
   const v = ev.target.value;
   if (v.trim().length < 2) { $("#results").hidden = true; return; }
   qTimer = setTimeout(async () => {
-    if (!state.busca) { $("#results").innerHTML = `<li aria-disabled="true"><span class="r2">Carregando índice de endereços…</span></li>`; $("#results").hidden = false; }
-    await ensureBusca();
-    if ($("#q").value === v) renderResults(search(v));
-  }, 120);
+    const ul = $("#results");
+    const slow = setTimeout(() => { ul.innerHTML = `<li aria-disabled="true"><span class="r2">Buscando…</span></li>`; ul.hidden = false; }, 250);
+    let rs;
+    try { rs = await search(v); } catch { rs = undefined; }
+    clearTimeout(slow);
+    if ($("#q").value !== v) return;
+    if (rs === undefined) { ul.innerHTML = `<li aria-disabled="true"><span class="r2">A busca não carregou. Verifique a conexão e tente de novo.</span></li>`; ul.hidden = false; }
+    else if (rs === null) { ul.innerHTML = `<li aria-disabled="true"><span class="r2">Digite pelo menos 3 letras do nome da rua ou do prédio.</span></li>`; ul.hidden = false; }
+    else renderResults(rs);
+  }, 150);
 });
 $("#q").addEventListener("keydown", (ev) => {
   const ul = $("#results"); if (ul.hidden || !lastResults.length) return;
@@ -886,6 +796,7 @@ addEventListener("hashchange", routeFromHash);
   try {
     state.meta = await getJSON("data/meta.json");
     state.ipca = state.meta.ipca; state.lastIpcaKey = String(state.meta.ipca_ref);
+    if (state.meta.breaks) state.breaks = state.meta.breaks;
     $("#m-first").textContent = fmtDate(state.meta.primeira_venda.replace(/-/g, ""));
     $("#m-last").textContent = fmtDate(state.meta.ultima_venda.replace(/-/g, ""));
   } catch (err) { $("#detail").innerHTML = `<p class="hint">Não foi possível carregar os dados (${esc(err.message)}).</p>`; return; }

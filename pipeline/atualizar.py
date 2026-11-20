@@ -16,7 +16,7 @@ STEPS = [
     ["download_base.py"],
     ["parse_itbi.py"],
     ["build_site_data.py"],
-    ["pack_site.py"],
+    ["build_tiles.py"],
 ]
 
 

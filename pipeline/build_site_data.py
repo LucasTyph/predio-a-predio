@@ -19,6 +19,7 @@ import gzip
 import json
 import math
 import re
+import unicodedata
 import zlib
 from collections import Counter
 from datetime import date
@@ -26,6 +27,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from shapely.geometry import shape
 
 ROOT = Path(__file__).resolve().parent.parent
 INTERIM = ROOT / "data" / "interim"
@@ -33,6 +35,7 @@ LOTES = ROOT / "data" / "raw" / "geo" / "lotes"
 BASE = ROOT / "data" / "raw" / "geo" / "base"
 VENDOR = ROOT / "data" / "raw" / "vendor"
 OUT = ROOT / "site" / "data"
+TILES_SRC = ROOT / "data" / "tiles_src"
 
 USOS_RESIDENCIAIS = {10, 12, 13, 14, 20, 21, 22, 25}
 APTO_RE = re.compile(r"\b(AP|APT|APTO|APART|APARTAMENTO|UNID|UN|CJ|FLAT|STUDIO|ST)\b\.?\s*\d", re.I)
@@ -210,6 +213,7 @@ def main():
     df["bkey"] = list(zip(df["setor"], df["quadra"], df["logr_n"], df["num"]))
 
     busca = []
+    tiles = Camadas(TILES_SRC)
     total_ok = total_lote = 0
     usados = set()
     hoje = df["data"].max()
@@ -252,7 +256,7 @@ def main():
             acc = Counter(accs).most_common(1)[0][0] if accs else None
             nome = nome_edificio([r["referencia"] for r in g], [r["bairro"] for r in g])
             logr = moda([r["logradouro"] for r in g])
-            bairro = moda([r["bairro"] for r in g if not re.search(r"(ED|COND|AP|BL)", r["bairro"])])
+            bairro = moda([r["bairro"] for r in g if not re.search(r"\b(ED|COND|AP|BL)\b", r["bairro"])])
             ceps = [str(int(r["cep"])) for r in g if nz(r["cep"]) > 0]
             vendas = [[
                 r["dnum"], round(float(r["valor"]), 2), round(float(nz(r["area_construida"])), 1),
@@ -264,56 +268,76 @@ def main():
             endereco = f"{logr}, {num}" if num else f"{logr}, s/n"
             edificios.append({
                 "id": bid, "q": quadra, "e": endereco, "nm": nome, "b": bairro,
-                "cep": moda(ceps), "lat": round_coord(lat), "lon": round_coord(lon), "poly": poly, "loc": how,
+                "cep": moda(ceps), "lat": round_coord(lat), "lon": round_coord(lon), "loc": how,
                 "v": 1 if vert else 0, "u": unidades, "acc": acc,
                 "m2": round(med_rec) if med_rec else None, "s": vendas,
             })
             busca.append([bid, setor, round_coord(lat), round_coord(lon), endereco, nome, bairro, len(g),
                           1 if vert else 0, round(med_rec) if med_rec else None])
+            m2p = round(med_rec) if med_rec else None
+            tiles.write(feature({"type": "Point", "coordinates": [round_coord(lon), round_coord(lat)]},
+                                {"id": bid, "s": setor, "n": len(g), **({"m2": m2p} if m2p else {})}, "edificios"))
+            if poly:
+                tiles.write(feature({"type": "Polygon", "coordinates": [poly]}, {"id": bid}, "lotes"))
         for q, v in qvals.items():
             quadra_stats[(setor, q)] = (float(np.median(v)), len(v))
         size = gz_json(OUT / "setor" / f"{setor}.json.gz", {"setor": setor, "ed": edificios})
         print(f"setor {setor}: {len(edificios)} edificios, {len(ds)} vendas, {size/1e6:.1f} MB", flush=True)
 
     print(f"edifícios {total_ok}, no lote exato {total_lote} ({total_lote/total_ok:.1%})", flush=True)
-    gz_json(OUT / "busca.json.gz", busca)
+    escreve_busca(busca)
 
-    # quadras com estatística
-    feats = []
+    # quadras com o R$/m² mediano recente
     for f in quadras_gj["features"]:
         p = f["properties"]
         k = (p["cd_setor_fiscal"], p["cd_quadra_fiscal"])
         st = quadra_stats.get(k)
-        feats.append({"type": "Feature", "geometry": quantize(f["geometry"]),
-                      "properties": {"s": k[0], "q": k[1], "m2": round(st[0]) if st else None,
-                                     "n": st[1] if st else 0}})
-    gz_json(OUT / "quadras.json.gz", {"type": "FeatureCollection", "features": feats})
+        props = {"s": k[0], "q": k[1]}
+        if st:
+            props.update({"m2": round(st[0]), "n": st[1]})
+        tiles.write(feature(f["geometry"], props, "quadras"))
 
-    # ruas: agrega nome
+    # ruas (só para os rótulos): avenidas e vias principais numa camada, demais ruas em outra
     with open(BASE / "segmento_logradouro.geojson", encoding="utf-8") as fh:
         ruas = json.load(fh)
-    rf = []
     for f in ruas["features"]:
         p = f["properties"]
         nome = " ".join(x for x in [p.get("cd_tipo_logradouro"), p.get("cd_titulo_logradouro"),
                                     p.get("tx_preposicao_logradouro"), p.get("nm_logradouro")] if x)
         tipo = (p.get("cd_tipo_logradouro") or "").upper()
         rank = 1 if tipo in ("AV", "VD", "ROD", "EST", "MAR", "PTE", "TUN", "CMP") else 2
-        rf.append({"type": "Feature", "geometry": quantize(f["geometry"]),
-                   "properties": {"n": titulo(nome), "r": rank}})
-    gz_json(OUT / "ruas.json.gz", {"type": "FeatureCollection", "features": rf})
+        tiles.write(feature(f["geometry"], {"n": titulo(nome)}, "avenidas" if rank == 1 else "ruas"))
 
-    # distritos + transporte
-    out = {}
-    for layer in ["distrito_municipal", "estacao_metro", "linha_metro"]:
-        p = BASE / f"{layer}.geojson"
-        if p.exists():
-            with open(p, encoding="utf-8") as fh:
-                gj = json.load(fh)
-            for f in gj["features"]:
-                f["geometry"] = quantize(f["geometry"])
-            out[layer] = gj
-    gz_json(OUT / "distritos.json.gz", out)
+    # distritos (contorno e rótulo) e metrô
+    dist = json.load(open(BASE / "distrito_municipal.geojson", encoding="utf-8"))
+    for f in dist["features"]:
+        nome = titulo_nome(f["properties"]["nm_distrito_municipal"])
+        tiles.write(feature(f["geometry"], {}, "distritos"))
+        pt = shape(f["geometry"]).representative_point()
+        tiles.write(feature({"type": "Point", "coordinates": [round(pt.x, 5), round(pt.y, 5)]},
+                            {"n": nome}, "distritos_rotulo"))
+    p = BASE / "linha_metro.geojson"
+    if p.exists():
+        for f in json.load(open(p, encoding="utf-8"))["features"]:
+            cor = METRO_CORES.get((f["properties"].get("nm_linha_metro_trem") or "").upper())
+            tiles.write(feature(f["geometry"], {"cor": cor} if cor else {}, "metro_linhas"))
+    p = BASE / "estacao_metro.geojson"
+    if p.exists():
+        for f in json.load(open(p, encoding="utf-8"))["features"]:
+            tiles.write(feature(f["geometry"], {"n": titulo_nome(f["properties"]["nm_estacao_metro_trem"])},
+                                "metro_estacoes"))
+    tiles.close()
+
+    # faixas de cor do mapa (sétimos da distribuição do R$/m² por quadra)
+    vals = sorted(v[0] for v in quadra_stats.values())
+    breaks = []
+    for i in range(1, 7):
+        v = vals[len(vals) * i // 7]
+        n = round(v / 250) * 250 if v < 5000 else round(v / 500) * 500
+        if not breaks or n > breaks[-1]:
+            breaks.append(n)
+    while len(breaks) < 6:
+        breaks.append(breaks[-1] + 1000)
 
     # IPCA (índice acumulado mensal, base = último mês)
     ipca = json.load(open(VENDOR / "ipca.json", encoding="utf-8"))
@@ -326,6 +350,7 @@ def main():
     ultimo = idx[-1][1]
     top = sorted((r for r in busca if r[8] and re.search(r"TATUAP", f"{r[6]} {r[4]}")), key=lambda r: -r[7])[:8]
     meta = {
+        "breaks": breaks,
         "destaques": top,
         "atualizado": date.today().isoformat(),
         "ultima_venda": hoje.strftime("%Y-%m-%d"),
@@ -338,6 +363,82 @@ def main():
     with open(OUT / "meta.json", "w", encoding="utf-8") as fh:
         json.dump(meta, fh, ensure_ascii=False)
     print("ok")
+
+
+METRO_CORES = {"AZUL": "#0455a1", "VERDE": "#007e5e", "VERMELHA": "#ee372f", "AMARELA": "#ffd400",
+               "LILÁS": "#9b3894", "LILAS": "#9b3894", "PRATA": "#9e9e9e", "OURO": "#c9a227", "LARANJA": "#f68b1f"}
+
+
+def feature(geom, props, layer):
+    """(camada, linha de GeoJSON) para o arquivo de entrada do tippecanoe daquela camada."""
+    return layer, json.dumps({"type": "Feature", "geometry": geom, "properties": props},
+                             ensure_ascii=False, separators=(",", ":")) + "\n"
+
+
+class Camadas:
+    """Um arquivo GeoJSON (uma feição por linha) por camada do mapa, em data/tiles_src/.
+
+    Os zooms de cada camada ficam em pipeline/build_tiles.py."""
+
+    def __init__(self, pasta):
+        self.pasta = pasta
+        self.arquivos = {}
+        pasta.mkdir(parents=True, exist_ok=True)
+        for f in pasta.glob("*.geojsonl"):
+            f.unlink()
+
+    def write(self, item):
+        layer, line = item
+        fh = self.arquivos.get(layer)
+        if fh is None:
+            fh = self.arquivos[layer] = open(self.pasta / f"{layer}.geojsonl", "w", encoding="utf-8", newline="\n")
+        fh.write(line)
+
+    def close(self):
+        for fh in self.arquivos.values():
+            fh.close()
+
+
+def titulo_nome(s):
+    minus = {"DE", "DA", "DO", "DAS", "DOS", "E"}
+    return " ".join(w.lower() if w in minus else w.title() for w in (s or "").split())
+
+
+def norm_busca(s):
+    s = unicodedata.normalize("NFD", s or "")
+    s = "".join(c for c in s if not unicodedata.combining(c)).upper()
+    return re.sub(r"\s+", " ", re.sub(r"[^A-Z0-9 ]", " ", s)).strip()
+
+
+def escreve_busca(busca, limite=6000):
+    """Índice de busca dividido pelo começo das palavras.
+
+    Cada edifício entra no arquivo de cada palavra (3+ letras) do endereço, do nome e do bairro,
+    pela chave das 2 primeiras letras. Chaves com mais de `limite` edifícios são divididas em
+    3 letras. O navegador baixa só o arquivo da palavra mais longa digitada."""
+    pal = []
+    por2 = {}
+    for i, r in enumerate(busca):
+        toks = {t for t in norm_busca(f"{r[4]} {r[5]} {r[6]}").split() if len(t) >= 3 and not t.isdigit()}
+        pal.append(toks)
+        for t in toks:
+            por2.setdefault(t[:2], set()).add(i)
+    split = sorted(k for k, v in por2.items() if len(v) > limite)
+    shards = {}
+    for i, toks in enumerate(pal):
+        for t in toks:
+            k = t[:3] if t[:2] in split else t[:2]
+            shards.setdefault(k, set()).add(i)
+    dest = OUT / "busca"
+    if dest.exists():
+        for f in dest.glob("*"):
+            f.unlink()
+    total = 0
+    for k, ids in shards.items():
+        total += gz_json(dest / f"{k}.json.gz", [busca[i] for i in sorted(ids)])
+    with open(dest / "index.json", "w", encoding="utf-8") as fh:
+        json.dump({"split": split}, fh)
+    print(f"busca: {len(shards)} arquivos, {total / 1e6:.0f} MB sem compressão", flush=True)
 
 
 def quantize(g):
