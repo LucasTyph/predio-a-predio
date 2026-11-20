@@ -19,6 +19,7 @@ import gzip
 import json
 import math
 import re
+import zlib
 from collections import Counter
 from datetime import date
 from pathlib import Path
@@ -169,6 +170,20 @@ def localiza(grupo_setor, lotes, quadra_cent):
     return res
 
 
+def id_estavel(key, usados):
+    """ID do edifício que não muda entre atualizações (links compartilhados continuam valendo).
+
+    setor (3 dígitos) + quadra (3) + hash do logradouro e número (5). Colisões na mesma quadra,
+    raras, avançam para o próximo número livre."""
+    setor, quadra, logr_n, num = key
+    h = zlib.crc32(f"{logr_n}|{num}".encode("utf-8")) % 100000
+    base = int(setor) * 10**8 + int(quadra) * 10**5
+    while base + h in usados:
+        h = (h + 1) % 100000
+    usados.add(base + h)
+    return base + h
+
+
 def moda(s):
     s = [x for x in s if x]
     if not s:
@@ -196,7 +211,7 @@ def main():
 
     busca = []
     total_ok = total_lote = 0
-    bid = 0
+    usados = set()
     hoje = df["data"].max()
     corte_recente = hoje - pd.DateOffset(years=3)
     quadra_stats = {}
@@ -226,7 +241,7 @@ def main():
             if L is None:
                 continue
             lat, lon, poly, how = L
-            bid += 1
+            bid = id_estavel(key, usados)
             total_ok += 1
             total_lote += how == "lote"
             vert = any(nz(r["uso"]) in (20, 21, 22, 25) or r["planta"] for r in g)

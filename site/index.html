@@ -423,6 +423,10 @@ async function initMap() {
   const start = store.get("view");
   let center = [-46.5745, -23.5405], zoom = 14.6; // Tatuapé
   if (start) { try { const v = JSON.parse(start); center = v.c; zoom = v.z; } catch { /* ignora */ } }
+  // baixa as camadas base enquanto o mapa inicializa
+  const baseP = Promise.all([getJSON("data/quadras.txt"), getJSON("data/distritos.txt")]);
+  const ruasP = getJSON("data/ruas.txt");
+  baseP.catch(() => {}); ruasP.catch(() => {});
   const map = new maplibregl.Map({
     container: "map", style: styleFor(), center, zoom, minZoom: 9.5, maxZoom: 18.5,
     maxBounds: [[-47.05, -24.1], [-46.2, -23.3]], attributionControl: false, dragRotate: false, pitchWithRotate: false,
@@ -434,7 +438,7 @@ async function initMap() {
   await new Promise((res) => map.on("load", res));
 
   setStatus("Carregando quadras…");
-  const [quadras, dist] = await Promise.all([getJSON("data/quadras.txt"), getJSON("data/distritos.txt")]);
+  const [quadras, dist] = await baseP;
   computeBreaks(quadras);
   map.setPaintProperty("quadras", "fill-color", ["interpolate", ["linear"], ["zoom"], 13.8, stepExpr("m2", css("--nodata")), 14.8, css("--nodata")]);
   map.setPaintProperty("edificios", "circle-color", stepExpr("m2", css("--muted")));
@@ -447,7 +451,7 @@ async function initMap() {
   applyBase();
   renderLegend();
   setStatus("");
-  getJSON("data/ruas.txt").then((r) => { baseData.ruas = r; map.getSource("ruas").setData(r); }).catch(() => {});
+  ruasP.then((r) => { baseData.ruas = r; map.getSource("ruas").setData(r); }).catch(() => {});
 
   map.on("moveend", () => { store.set("view", JSON.stringify({ c: map.getCenter().toArray(), z: map.getZoom() })); loadVisible(); });
   map.on("click", "edificios", (e) => { const f = e.features[0]; if (f) selectBuilding(f.properties.s, f.properties.id, { fly: false }); });
