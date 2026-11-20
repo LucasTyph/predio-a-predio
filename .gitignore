@@ -1,0 +1,8 @@
+# dados baixados e gerados (o GitHub Actions recria tudo a cada execução)
+data/
+site/data/
+site/glyphs/**/*.txt
+dist/
+__pycache__/
+*.pyc
+.claude/

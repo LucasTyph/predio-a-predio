@@ -1,0 +1,59 @@
+name: Atualizar dados e publicar
+
+on:
+  schedule:
+    # Dia 10 de cada mês, 06:00 em Brasília. A Fazenda publica o mês anterior consolidado no começo do mês.
+    - cron: "0 9 10 * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - "pipeline/**"
+      - "requirements.txt"
+      - ".github/workflows/atualizar.yml"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Instalar dependências
+        run: pip install -r requirements.txt
+
+      - name: Baixar fontes e montar o site
+        run: python -I pipeline/atualizar.py --pages
+
+      - name: Resumo
+        run: |
+          python -I -c "import json; m=json.load(open('site/data/meta.json')); print(f\"### Dados atualizados\n\n- Vendas: {m['n_vendas']:,}\n- Endereços: {m['n_edificios']:,}\n- Vendas de {m['primeira_venda']} a {m['ultima_venda']}\n- IPCA até {m['ipca_ref']}\")" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
