@@ -40,7 +40,12 @@ jobs:
           sudo apt-get install -y -q tippecanoe
           pip install -r requirements.txt
 
+      - id: pages
+        uses: actions/configure-pages@v5
+
       - name: Baixar fontes e montar o site
+        env:
+          SITE_URL: ${{ steps.pages.outputs.base_url }}
         run: python -I pipeline/atualizar.py --pages
 
       - name: Resumo

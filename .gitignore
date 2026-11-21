@@ -2,6 +2,7 @@
 data/
 site/data/
 site/tiles/
+site/og.jpg
 site/glyphs/**/*.txt
 dist/
 __pycache__/

@@ -15,17 +15,20 @@
   --nodata: #dde2e8;      /* quadra sem vendas recentes */
   --accent: #2a78d6;      /* série principal */
   --select: #eb6834;      /* edifício selecionado */
+  --neg: #c2413b;         /* desvalorização */
   --ring: #fbfcfd;
   --chip: #e6ebf1;
   --s1: #cde2fb; --s2: #9ec5f4; --s3: #6da7ec; --s4: #3987e5; --s5: #256abf; --s6: #184f95; --s7: #0d366b;
+  --d1: #b3302d; --d2: #e0605a; --d3: #f2b0aa; --d4: #e4e2dd; --d5: #9ec5f4; --d6: #3987e5; --d7: #184f95;
   --font-display: "Archivo", "Helvetica Neue", Arial, sans-serif;
   --font-body: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --panel-w: 480px;
 }
 :root[data-theme="dark"] {
   --bg: #0f1215; --panel: #171a1e; --fg: #eef0f2; --fg-2: #c0c6ce; --muted: #8f98a3; --line: #2b3037;
-  --nodata: #22272d; --accent: #3987e5; --select: #f07a45; --ring: #171a1e; --chip: #23282e;
+  --nodata: #22272d; --accent: #3987e5; --select: #f07a45; --ring: #171a1e; --chip: #23282e; --neg: #ef7d76;
   --s1: #10294a; --s2: #133a68; --s3: #184f95; --s4: #256abf; --s5: #3987e5; --s6: #6da7ec; --s7: #b7d3f6;
+  --d1: #f4a29c; --d2: #d9625c; --d3: #7a3330; --d4: #383835; --d5: #1c4a80; --d6: #3987e5; --d7: #9ec5f4;
   color-scheme: dark;
 }
 [hidden] { display: none !important; }
@@ -91,6 +94,16 @@ body.resizing #map { pointer-events: none; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .chip { background: var(--chip); border-radius: 999px; padding: 3px 9px; font-size: 12px; color: var(--fg-2); }
 .chip.warn { background: transparent; border: 1px dashed var(--muted); }
+.chip.copy { border: 1px solid var(--line); background: transparent; color: var(--accent); cursor: pointer; display: inline-flex; align-items: center; gap: 5px; font: inherit; font-size: 12px; }
+.chip.copy:hover { background: var(--chip); }
+.chip.copy svg { width: 12px; height: 12px; }
+.chip.copy.ok { color: var(--fg); background: var(--chip); }
+.linkcampo { flex: 1 1 220px; min-width: 0; font-size: 12px; padding: 3px 8px; border: 1px solid var(--accent); border-radius: 999px; background: var(--bg); }
+.revsum { font-size: 13px; line-height: 1.5; color: var(--fg-2); margin: 6px 0 2px; }
+.revsum b { color: var(--fg); font-variant-numeric: tabular-nums; }
+td.up { color: var(--fg); }
+.pos { color: var(--accent); font-weight: 600; }
+.neg { color: var(--neg); font-weight: 600; }
 .kpis { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
 .kpi { background: var(--panel); padding: 10px 12px; display: grid; gap: 2px; min-width: 0; }
 .kpi .k { font-size: 12px; color: var(--muted); }
@@ -143,13 +156,28 @@ tbody tr { cursor: pointer; }
   background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px; font-size: 11.5px; color: var(--fg-2);
   display: grid; gap: 6px;
 }
-.maplegend .ramp { display: grid; grid-template-columns: repeat(7, 26px); gap: 2px; }
+.maplegend .ramp { display: grid; grid-template-columns: repeat(7, 31px); gap: 2px; }
 .maplegend .ramp span { height: 10px; }
 .maplegend .ramp span:first-child { border-radius: 3px 0 0 3px; }
 .maplegend .ramp span:last-child { border-radius: 0 3px 3px 0; }
-.maplegend .ticks { display: grid; grid-template-columns: repeat(7, 26px); gap: 2px; font-variant-numeric: tabular-nums; font-size: 10.5px; color: var(--muted); }
+.maplegend .ticks { display: grid; grid-template-columns: repeat(7, 31px); gap: 2px; font-variant-numeric: tabular-nums; font-size: 10.5px; color: var(--muted); }
 .maplegend .ticks span { text-align: left; transform: translateX(-4px); }
 .maplegend .nd { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+.mapctl {
+  position: absolute; z-index: 2; left: calc(10px + env(safe-area-inset-left, 0px)); top: calc(10px + env(safe-area-inset-top, 0px));
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 6px; display: grid; gap: 8px;
+  font-size: 12.5px; color: var(--fg-2); max-width: min(300px, calc(100% - 70px));
+}
+.mapctl .row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.mapctl select { background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 4px 6px; font-size: 12.5px; min-width: 0; max-width: 100%; }
+.mapctl .btn { background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 4px 9px; font-size: 12.5px; cursor: pointer; }
+.mapctl .btn[aria-expanded="true"] { background: var(--chip); color: var(--fg); }
+.mapctl .btn .count { display: inline-grid; place-items: center; min-width: 16px; height: 16px; border-radius: 8px; background: var(--accent); color: var(--panel); font-size: 10.5px; margin-left: 4px; padding: 0 4px; }
+.mapctl fieldset { border: 0; margin: 0; padding: 0; display: grid; gap: 6px; }
+.mapctl legend { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); font-weight: 600; padding: 0; margin-bottom: 2px; }
+.mapctl .filt { display: grid; gap: 10px; padding: 4px 4px 2px; border-top: 1px solid var(--line); }
+.mapctl .note { font-size: 11.5px; }
+.mapctl label.chk { display: flex; gap: 6px; align-items: center; cursor: pointer; }
 .maplegend .nd i { width: 12px; height: 10px; background: var(--nodata); border-radius: 2px; display: inline-block; }
 #status {
   position: absolute; left: 50%; top: calc(12px + env(safe-area-inset-top, 0px)); transform: translateX(-50%); z-index: 2;
@@ -176,9 +204,11 @@ dialog .close { float: right; }
   }
   #panel.collapsed #detail, #panel.collapsed .hint { display: none; }
   .brand { padding-block: 12px 6px; }
-  .maplegend { bottom: auto; top: calc(10px + env(safe-area-inset-top, 0px)); }
+  .maplegend { top: auto; bottom: calc(58% + 36px); right: auto; left: calc(10px + env(safe-area-inset-left, 0px)); padding: 7px 9px; }
+  .mapctl { max-width: calc(100% - 70px); }
   #status { top: auto; bottom: calc(60% + 8px); }
-  .maplibregl-ctrl-bottom-right { bottom: 58%; }
+  #map .maplibregl-ctrl-bottom-right { bottom: 58%; }
+  #status { bottom: auto; top: calc(118px + env(safe-area-inset-top, 0px)); }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
@@ -207,6 +237,41 @@ dialog .close { float: right; }
   <div id="resizer" role="separator" aria-orientation="vertical" aria-label="Redimensionar painel" tabindex="0" title="Arraste para redimensionar (duplo clique volta ao tamanho padrão)"></div>
   <div id="map" role="region" aria-label="Mapa de São Paulo com preço por metro quadrado por quadra">
     <div id="status">Carregando mapa…</div>
+    <div class="mapctl" id="mapctl">
+      <div class="row">
+        <label for="modoSel">Cor do mapa</label>
+        <select id="modoSel">
+          <option value="m2">R$/m²</option>
+          <option value="val">Variação real em 5 anos</option>
+          <option value="vol">Vendas por ano</option>
+          <option value="fin">% financiado</option>
+          <option value="acc">Ano de construção</option>
+        </select>
+        <button type="button" class="btn" id="filtBtn" aria-expanded="false" aria-controls="filtPanel">Filtros</button>
+      </div>
+      <div class="filt" id="filtPanel" hidden>
+        <fieldset>
+          <legend>Tipo</legend>
+          <div class="seg" role="group" aria-label="Tipo de imóvel" id="tipoSeg">
+            <button type="button" data-v="todos" aria-pressed="true">Todos</button>
+            <button type="button" data-v="aptos" aria-pressed="false">Apartamentos</button>
+            <button type="button" data-v="casas" aria-pressed="false">Casas</button>
+          </div>
+        </fieldset>
+        <fieldset>
+          <legend><label for="idadeSel">Construção</label></legend>
+          <select id="idadeSel">
+            <option value="">Qualquer ano</option>
+            <option value="0-1980">Antes de 1980</option>
+            <option value="1980-2000">1980 a 1999</option>
+            <option value="2000-2015">2000 a 2014</option>
+            <option value="2015-9999">2015 em diante</option>
+          </select>
+        </fieldset>
+        <label class="chk"><input type="checkbox" id="recSel"> Só com vendas nos últimos 3 anos</label>
+        <div class="note">Os filtros valem para os pontos dos prédios, que aparecem ao aproximar o mapa.</div>
+      </div>
+    </div>
     <div class="maplegend" id="legend" hidden></div>
   </div>
 </div>
@@ -228,7 +293,9 @@ dialog .close { float: right; }
     <li>Gráficos e medianas usam só <b>compra e venda do imóvel inteiro</b> (proporção ≥ 99%), com área de pelo menos 15 m² e R$/m² entre 200 e 80 mil. As outras transações aparecem na tabela em cinza.</li>
     <li><b>Venda na planta</b>: antes de o prédio ser individualizado, as unidades são vendidas sobre o cadastro do terreno, sem área própria. Elas entram no histórico do prédio, mas não no R$/m².</li>
     <li>A data é a da transação declarada. A guia pode ser paga meses depois, então os últimos meses ainda vão receber vendas.</li>
-    <li>A cor da quadra é a mediana do R$/m² nos últimos 3 anos. Pontos marcados como "posição aproximada" não foram casados com um lote e estão no centro da quadra.</li>
+    <li>A cor do mapa pode mostrar: o R$/m² mediano dos últimos 3 anos; a variação real (descontado o IPCA) desse R$/m² em relação a 5 anos antes, que exige pelo menos 5 vendas por quadra em cada período (3 por prédio); quantas compras e vendas a quadra teve por ano; a parte delas feita com financiamento; e o ano de construção mediano dos prédios com vendas.</li>
+    <li><b>Revendas</b> comparam a mesma unidade (o mesmo cadastro de IPTU) comprada e depois vendida de novo. Compras na planta entram quando o número do apartamento e o bloco identificam uma única unidade. Variações acima de 4 vezes ou abaixo de um terço ficam fora da mediana, porque costumam ser erro de digitação ou venda fora de mercado.</li>
+    <li>Pontos marcados como "posição aproximada" não foram casados com um lote e estão no centro da quadra.</li>
   </ul>
   <p class="note">Dados públicos. Não há nomes de compradores ou vendedores nas planilhas da Prefeitura.</p>
 </dialog>
@@ -297,7 +364,10 @@ const state = {
   meta: null, ipca: {}, busca: null, buscaNorm: null, setorBBox: {}, loaded: new Map(), loading: new Map(),
   byId: new Map(), selected: null, real: store.get("real") !== "0", unit: "", sort: { k: "d", dir: -1 }, showAll: false,
   breaks: [4000, 6000, 8000, 10000, 13000, 17000], map: null,
+  modo: "m2", filtros: { tipo: "todos", idade: "", rec: false },
 };
+try { const f = JSON.parse(store.get("filtros") || "null"); if (f) state.filtros = { ...state.filtros, ...f }; } catch { /* ignora */ }
+state.modo = store.get("modo") || "m2";
 const deflate = (v, d) => {
   if (!state.real) return v;
   const k = Math.floor(d / 100);
@@ -311,23 +381,87 @@ const deflate = (v, d) => {
 const protocol = new pmtiles.Protocol();
 maplibregl.addProtocol("pmtiles", protocol.tile);
 const TILES_URL = "pmtiles://" + BASE + "tiles/mapa.pmtiles";
-function rampColors() { return ["--s1", "--s2", "--s3", "--s4", "--s5", "--s6", "--s7"].map(css); }
+const CAMADAS_PADRAO = {
+  m2: { titulo: "R$/m² mediano, últimos 3 anos", fmt: "k", tipo: "seq" },
+  val: { titulo: "Variação real do R$/m² em 5 anos", breaks: [-20, -10, -3, 3, 10, 20], fmt: "pct", tipo: "div" },
+  vol: { titulo: "Vendas por ano, últimos 3 anos", breaks: [0.5, 1, 2, 3, 5, 10], fmt: "num", tipo: "seq" },
+  fin: { titulo: "Vendas com financiamento, últimos 3 anos", breaks: [10, 20, 30, 40, 50, 60], fmt: "pct0", tipo: "seq" },
+  acc: { titulo: "Ano de construção (mediana)", breaks: [1965, 1980, 1990, 2000, 2010, 2018], fmt: "ano", tipo: "seq" },
+};
+const SEM_DADO = { m2: "sem vendas recentes", val: "poucas vendas para comparar", vol: "sem vendas recentes", fin: "poucas vendas recentes", acc: "sem informação" };
+function camada(modo = state.modo) {
+  const c = { ...CAMADAS_PADRAO[modo], ...(state.meta?.camadas?.[modo] || {}) };
+  if (modo === "m2") c.breaks = state.meta?.camadas?.m2?.breaks || state.breaks;
+  return c;
+}
+function rampColors(tipo = camada().tipo) {
+  const pre = tipo === "div" ? "--d" : "--s";
+  return [1, 2, 3, 4, 5, 6, 7].map((i) => css(pre + i));
+}
 function stepExpr(prop, fallback) {
-  const c = rampColors();
+  const cam = camada(prop);
+  const c = rampColors(cam.tipo);
   const e = ["step", ["get", prop], c[0]];
-  state.breaks.forEach((b, i) => e.push(b, c[i + 1]));
+  cam.breaks.forEach((b, i) => e.push(b, c[i + 1]));
   return ["case", ["has", prop], e, fallback];
 }
+function fmtTick(v, fmt) {
+  if (fmt === "k") return (v / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + "k";
+  if (fmt === "pct") return (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v) + "%";
+  if (fmt === "pct0") return v + "%";
+  if (fmt === "num") return v.toLocaleString("pt-BR");
+  return String(v);
+}
 function renderLegend() {
-  const c = rampColors();
+  const cam = camada();
+  const c = rampColors(cam.tipo);
   const el = $("#legend");
-  const ticks = ["", ...state.breaks.map((b) => (b / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + "k")];
-  el.innerHTML = `<div><b>R$/m²</b> mediano, últimos 3 anos</div>
+  const ticks = ["", ...cam.breaks.map((b) => fmtTick(b, cam.fmt))];
+  el.innerHTML = `<div><b>${esc(cam.titulo)}</b></div>
     <div class="ramp">${c.map((x) => `<span style="background:${x}"></span>`).join("")}</div>
     <div class="ticks">${ticks.map((t) => `<span>${t}</span>`).join("")}</div>
-    <div class="nd"><i></i>sem vendas recentes</div>`;
+    <div class="nd"><i></i>${esc(SEM_DADO[state.modo])}</div>`;
   el.hidden = false;
 }
+function quadraColor() { const nod = css("--nodata"); return ["interpolate", ["linear"], ["zoom"], 13.8, stepExpr(state.modo, nod), 14.8, nod]; }
+function applyModo() {
+  const map = state.map;
+  if (map && map.getLayer("quadras")) {
+    map.setPaintProperty("quadras", "fill-color", quadraColor());
+    map.setPaintProperty("edificios", "circle-color", stepExpr(state.modo, css("--muted")));
+  }
+  renderLegend();
+}
+function filtroExpr() {
+  const f = state.filtros, all = [];
+  if (f.tipo === "aptos") all.push(["==", ["get", "v"], 1]);
+  if (f.tipo === "casas") all.push(["==", ["get", "v"], 0]);
+  if (f.idade) {
+    const [a, b] = f.idade.split("-").map(Number);
+    all.push(["has", "acc"], [">=", ["get", "acc"], a], ["<", ["get", "acc"], b]);
+  }
+  if (f.rec) all.push(["has", "m2"]);
+  return all.length ? ["all", ...all] : null;
+}
+function nFiltros() { const f = state.filtros; return (f.tipo !== "todos") + !!f.idade + !!f.rec; }
+function applyFiltros() {
+  const map = state.map;
+  if (map && map.getLayer("edificios")) map.setFilter("edificios", filtroExpr());
+  const n = nFiltros();
+  $("#filtBtn").innerHTML = "Filtros" + (n ? `<span class="count">${n}</span>` : "");
+  $("#tipoSeg").querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", b.dataset.v === state.filtros.tipo));
+  $("#idadeSel").value = state.filtros.idade;
+  $("#recSel").checked = state.filtros.rec;
+  store.set("filtros", JSON.stringify(state.filtros));
+}
+$("#modoSel").value = state.modo;
+$("#modoSel").addEventListener("change", (ev) => { state.modo = ev.target.value; store.set("modo", state.modo); applyModo(); });
+$("#filtBtn").addEventListener("click", () => {
+  const open = $("#filtPanel").hidden; $("#filtPanel").hidden = !open; $("#filtBtn").setAttribute("aria-expanded", open);
+});
+$("#tipoSeg").addEventListener("click", (ev) => { const b = ev.target.closest("button[data-v]"); if (b) { state.filtros.tipo = b.dataset.v; applyFiltros(); } });
+$("#idadeSel").addEventListener("change", (ev) => { state.filtros.idade = ev.target.value; applyFiltros(); });
+$("#recSel").addEventListener("change", (ev) => { state.filtros.rec = ev.target.checked; applyFiltros(); });
 const RAIO = (k) => ["interpolate", ["linear"], ["zoom"],
   13, ["+", k, ["interpolate", ["linear"], ["get", "n"], 1, 1.2, 30, 2.4, 300, 4.5]],
   14, ["+", k, ["interpolate", ["linear"], ["get", "n"], 1, 1.6, 30, 3.2, 300, 6]],
@@ -348,15 +482,15 @@ function styleFor() {
     layers: [
       { id: "bg", type: "background", paint: { "background-color": bg } },
       { id: "quadras", type: "fill", ...src, "source-layer": "quadras", paint: {
-        "fill-color": ["interpolate", ["linear"], ["zoom"], 13.8, stepExpr("m2", nod), 14.8, nod] } },
+        "fill-color": quadraColor() } },
       { id: "quadras-line", type: "line", ...src, "source-layer": "quadras", minzoom: 15.5, paint: { "line-color": line, "line-width": 0.6 } },
       { id: "distritos", type: "line", ...src, "source-layer": "distritos", paint: { "line-color": muted, "line-width": ["interpolate", ["linear"], ["zoom"], 10, 0.4, 14, 1.2], "line-opacity": 0.55, "line-dasharray": [3, 2] } },
       { id: "metrolinhas", type: "line", ...src, "source-layer": "metro_linhas", paint: { "line-color": ["coalesce", ["get", "cor"], "#888"], "line-width": ["interpolate", ["linear"], ["zoom"], 10, 1.5, 15, 4], "line-opacity": 0.9 } },
       { id: "sel-fill", type: "fill", ...src, "source-layer": "lotes", filter: ["==", ["get", "id"], -1], paint: { "fill-color": sel, "fill-opacity": 0.35 } },
       { id: "sel-line", type: "line", ...src, "source-layer": "lotes", filter: ["==", ["get", "id"], -1], paint: { "line-color": sel, "line-width": 2.5 } },
-      { id: "edificios", type: "circle", ...src, "source-layer": "edificios", paint: {
+      { id: "edificios", type: "circle", ...src, "source-layer": "edificios", ...(filtroExpr() ? { filter: filtroExpr() } : {}), paint: {
         "circle-radius": RAIO(0),
-        "circle-color": stepExpr("m2", muted),
+        "circle-color": stepExpr(state.modo, muted),
         "circle-stroke-color": fg, "circle-stroke-opacity": 0.45, "circle-stroke-width": ["interpolate", ["linear"], ["zoom"], 13, 0.3, 17, 1],
         "circle-opacity": ["interpolate", ["linear"], ["zoom"], 13, 0.55, 15, 1] } },
       { id: "edificios-sel", type: "circle", ...src, "source-layer": "edificios", filter: ["==", ["get", "id"], -1], paint: {
@@ -389,6 +523,7 @@ async function initMap() {
   map.addControl(new maplibregl.AttributionControl({ compact: true }));
   state.map = map;
   renderLegend();
+  applyFiltros();
   map.on("moveend", () => store.set("view", JSON.stringify({ c: map.getCenter().toArray(), z: map.getZoom() })));
   map.on("click", "edificios", (e) => { const f = e.features[0]; if (f) selectBuilding(f.properties.s, f.properties.id, { fly: false }); });
   map.on("mouseenter", "edificios", () => (map.getCanvas().style.cursor = "pointer"));
@@ -403,7 +538,7 @@ new MutationObserver(restyle).observe(document.documentElement, { attributes: tr
 function restyle() {
   const map = state.map; if (!map) return;
   map.setStyle(styleFor());
-  map.once("styledata", () => { renderLegend(); if (state.selected) highlight(state.selected); });
+  map.once("styledata", () => { renderLegend(); applyFiltros(); if (state.selected) highlight(state.selected); });
 }
 
 function loadSetor(s) {
@@ -518,7 +653,8 @@ async function selectBuilding(setor, id, opts = {}) {
   try { await loadSetor(setor); } catch { $("#detail").innerHTML = `<p class="hint">Não foi possível carregar as vendas deste setor. Verifique a conexão e tente de novo.</p>`; return; }
   const e = state.byId.get(id);
   if (!e) { $("#detail").innerHTML = `<p class="hint">Edifício não encontrado.</p>`; return; }
-  state.selected = e; state.unit = ""; state.showAll = false;
+  state.selected = e; state.unit = ""; state.unitSql = ""; state.showAll = false; state.revAll = false;
+  state.rev = revendas(e);
   if (opts.fly && map && !opts.lat) map.flyTo({ center: [e.lon, e.lat], zoom: Math.max(map.getZoom(), 16.5), speed: 1.6, padding: flyPad() });
   highlight(e);
   const h = `#ed-${setor}-${id}`;
@@ -579,6 +715,7 @@ function renderDetail() {
         ${acc ? `<span class="chip">${acc}</span>` : ""}
         <span class="chip">Setor ${esc(e.setor)} · quadra ${esc(e.q)}</span>
         ${e.loc !== "lote" ? `<span class="chip warn" title="Endereço não casado com um lote do GeoSampa; o ponto está no centro da quadra.">posição aproximada</span>` : ""}
+        <button type="button" class="chip copy" id="copyBtn"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M6.5 9.5a3 3 0 0 0 4.2 0l2.6-2.6a3 3 0 0 0-4.2-4.2L8 3.8"/><path d="M9.5 6.5a3 3 0 0 0-4.2 0L2.7 9.1a3 3 0 0 0 4.2 4.2L8 12.2"/></svg><span>Copiar link</span></button>
       </div>
     </div>
     <div class="kpis">
@@ -603,7 +740,8 @@ function renderDetail() {
       </div>
       ${ok.length ? "" : `<p class="note">Nenhuma venda deste endereço tem área e valor que permitam calcular o R$/m². Veja as transações na tabela.</p>`}
     </div>
-    <div style="display:grid;gap:8px;min-width:0">
+    <div style="display:grid;gap:8px;min-width:0" id="revSec"></div>
+    <div style="display:grid;gap:8px;min-width:0" id="txSec">
       <div class="section-h">
         <h3>Todas as transações</h3>
         <div class="filterrow">
@@ -619,15 +757,143 @@ function renderDetail() {
     const b = ev.target.closest("button[data-real]"); if (!b) return;
     state.real = b.dataset.real === "1"; store.set("real", state.real ? "1" : "0"); renderDetail();
   });
-  $("#unitSel").addEventListener("change", (ev) => { state.unit = ev.target.value; renderTable(); drawChart(); });
+  $("#unitSel").addEventListener("change", (ev) => { state.unit = ev.target.value; state.unitSql = ""; renderTable(); drawChart(); renderRevendas(); });
+  $("#copyBtn").addEventListener("click", copiarLink);
+  if (podeCompartilhar()) $("#copyBtn span").textContent = "Compartilhar";
+  renderRevendas();
   renderTable();
   drawChart();
+}
+
+// ------------------------------------------------------------------ revendas da mesma unidade
+const ipcaF = (d) => state.ipca[Math.floor(d / 100)] ?? state.ipca[state.lastIpcaKey] ?? 1;
+const mercado = (s) => s[S.N] === 1 && s[S.V] >= 5000 && (s[S.PL] || s[S.P] >= 99);
+function chaveUnidade(c) {
+  const t = normTxt(c);
+  const m = t.match(/\b(?:AP|APTO|APART|APARTAMENTO|UNID|UN|CJ|FLAT|STUDIO|ST)\s*(\d+[A-Z]?)\b/);
+  if (!m) return null;
+  const b = t.match(/\b(?:BL|BLOCO|TORRE|TR)\s*([A-Z0-9]{1,3})\b/);
+  return { ap: m[1], bl: b ? b[1] : "" };
+}
+// Cada unidade é um SQL. Vendas na planta (no SQL do terreno) entram na unidade com o mesmo
+// número de apartamento e bloco, quando só uma unidade combina.
+function revendas(e) {
+  const porSql = new Map(), planta = [];
+  e.s.forEach((s, i) => { if (s[S.PL]) planta.push(i); else { if (!porSql.has(s[S.SQL])) porSql.set(s[S.SQL], []); porSql.get(s[S.SQL]).push(i); } });
+  const chave = new Map();
+  for (const [sql, idx] of porSql) {
+    const cont = new Map();
+    for (const i of idx) { const k = chaveUnidade(e.s[i][S.U]); if (k) { const kk = k.ap + "|" + k.bl; cont.set(kk, (cont.get(kk) || 0) + 1); } }
+    const top = [...cont.entries()].sort((a, b) => b[1] - a[1])[0];
+    if (top) chave.set(sql, top[0]);
+  }
+  const plantaDe = new Map();
+  for (const i of planta) {
+    const k = chaveUnidade(e.s[i][S.U]); if (!k) continue;
+    const cands = [...chave.entries()].filter(([, kk]) => { const [ap, bl] = kk.split("|"); return ap === k.ap && (!k.bl || !bl || bl === k.bl); });
+    if (cands.length === 1) { plantaDe.set(i, cands[0][0]); porSql.get(cands[0][0]).push(i); }
+  }
+  const pares = [];
+  for (const [sql, idx] of porSql) {
+    const seq = idx.filter((i) => mercado(e.s[i])).sort((a, b) => e.s[a][S.D] - e.s[b][S.D]);
+    for (let k = 1; k < seq.length; k++) {
+      const a = e.s[seq[k - 1]], b = e.s[seq[k]];
+      const anos = yearFrac(b[S.D]) - yearFrac(a[S.D]);
+      if (anos < 0.25) continue;
+      const nominal = b[S.V] / a[S.V] - 1;
+      const real = (b[S.V] * ipcaF(b[S.D])) / (a[S.V] * ipcaF(a[S.D])) - 1;
+      const ratio = b[S.V] / a[S.V];
+      pares.push({ sql, ia: seq[k - 1], ib: seq[k], anos, nominal, real, anual: Math.pow(1 + real, 1 / anos) - 1,
+        suspeito: ratio < 0.33 || ratio > 4, unidade: b[S.U] || a[S.U] });
+    }
+  }
+  pares.sort((x, y) => e.s[y.ib][S.D] - e.s[x.ib][S.D]);
+  return { pares, plantaDe };
+}
+const pct = (v, casas = 0) => (v >= 0 ? "+" : "−") + Math.abs(v * 100).toLocaleString("pt-BR", { minimumFractionDigits: casas, maximumFractionDigits: casas }) + "%";
+const sinal = (v) => (v >= 0 ? "pos" : "neg");
+function unitMatch(s, i) {
+  if (state.unitSql) return (!s[S.PL] && s[S.SQL] === state.unitSql) || state.rev?.plantaDe.get(i) === state.unitSql;
+  if (state.unit) return s[S.U] === state.unit;
+  return true;
+}
+const unitAtivo = () => !!(state.unit || state.unitSql);
+function renderRevendas() {
+  const e = state.selected, sec = $("#revSec"); if (!sec) return;
+  const { pares } = state.rev;
+  const validos = pares.filter((p) => !p.suspeito);
+  const unidades = new Set(pares.map((p) => p.sql)).size;
+  let resumo;
+  if (!pares.length) resumo = `<p class="note">Nenhuma unidade deste endereço foi comprada e revendida no período, considerando só compra e venda do imóvel inteiro.</p>`;
+  else {
+    const anual = median(validos.map((p) => p.anual)), anos = median(validos.map((p) => p.anos));
+    resumo = `<p class="revsum"><b>${pares.length} ${pares.length === 1 ? "revenda" : "revendas"}</b> de ${unidades} ${unidades === 1 ? "unidade" : "unidades"}.` +
+      (validos.length ? ` Valorização mediana acima da inflação: <b class="${sinal(anual)}">${pct(anual, 1)} ao ano</b>, com o imóvel mantido por ${anos.toLocaleString("pt-BR", { maximumFractionDigits: 1 })} anos (mediana).` : "") + `</p>`;
+  }
+  const LIM = 8;
+  const lista = state.revAll ? pares : pares.slice(0, LIM);
+  const curto = (v) => "R$ " + fmtK(v);
+  sec.innerHTML = `
+    <div class="section-h"><h3>Revendas da mesma unidade</h3></div>
+    ${resumo}
+    ${pares.length ? `<div class="tablewrap"><table id="revTbl"><thead><tr><th>Unidade</th><th>Compra</th><th>Revenda</th><th class="n">Anos</th><th class="n">Nominal</th><th class="n">Acima da inflação</th></tr></thead>
+    <tbody>${lista.map((p, k) => {
+      const a = e.s[p.ia], b = e.s[p.ib];
+      return `<tr data-k="${k}" class="${p.suspeito ? "dim" : ""}${state.unitSql === p.sql ? " hl" : ""}" title="${p.suspeito ? "Variação muito grande; provável erro ou venda fora de mercado. Fica fora da mediana." : "Clique para ver só esta unidade"}">
+        <td>${esc(p.unidade || "—")}</td>
+        <td>${fmtDate(a[S.D]).slice(3)} · ${curto(a[S.V])}${a[S.PL] ? ` <span class="tag">na planta</span>` : ""}</td>
+        <td>${fmtDate(b[S.D]).slice(3)} · ${curto(b[S.V])}</td>
+        <td class="n">${p.anos.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}</td>
+        <td class="n">${pct(p.nominal)}</td>
+        <td class="n"><span class="${sinal(p.real)}">${pct(p.real)}</span> <span class="tag">(${pct(p.anual, 1)}/ano)</span></td></tr>`;
+    }).join("")}</tbody></table></div>
+    ${pares.length > LIM ? `<button class="linkbtn more" id="revMore" type="button">${state.revAll ? "Mostrar menos" : `Mostrar as ${pares.length} revendas`}</button>` : ""}
+    <p class="note">Mesma unidade comprada e depois vendida de novo (compra e venda do imóvel inteiro). "Acima da inflação" corrige os dois valores pelo IPCA. Clique numa linha para ver só aquela unidade no gráfico e na tabela.</p>` : ""}`;
+  const tb = $("#revTbl tbody");
+  if (tb) tb.onclick = (ev) => {
+    const tr = ev.target.closest("tr[data-k]"); if (!tr) return;
+    const p = lista[+tr.dataset.k];
+    state.unitSql = state.unitSql === p.sql ? "" : p.sql; state.unit = ""; $("#unitSel").value = "";
+    renderRevendas(); renderTable(); drawChart();
+  };
+  const more = $("#revMore"); if (more) more.onclick = () => { state.revAll = !state.revAll; renderRevendas(); };
+}
+
+// ------------------------------------------------------------------ copiar link
+const podeCompartilhar = () => !!navigator.share && matchMedia("(pointer: coarse)").matches;
+async function copiarLink() {
+  const btn = $("#copyBtn"), url = location.href, rotulo = btn.querySelector("span");
+  const e = state.selected;
+  if (podeCompartilhar()) {
+    try { await navigator.share({ title: (e?.nm ? titleCase(e.nm) : prettyAddr(e?.e || "")) + " · Prédio a Prédio", url }); return; }
+    catch (err) { if (err?.name === "AbortError") return; }
+  }
+  let ok = false;
+  try { await navigator.clipboard.writeText(url); ok = true; } catch {
+    const t = document.createElement("textarea"); t.value = url; t.setAttribute("readonly", ""); t.style.position = "fixed"; t.style.opacity = "0";
+    document.body.appendChild(t); t.select();
+    try { ok = document.execCommand("copy"); } catch { ok = false; }
+    t.remove();
+  }
+  if (!ok) {
+    // sem acesso à área de transferência: mostra o link selecionado para copiar à mão
+    let campo = $("#linkCampo");
+    if (!campo) {
+      campo = document.createElement("input");
+      campo.id = "linkCampo"; campo.readOnly = true; campo.className = "linkcampo"; campo.setAttribute("aria-label", "Link deste prédio");
+      btn.after(campo);
+    }
+    campo.value = url; campo.focus(); campo.select();
+    return;
+  }
+  btn.classList.add("ok"); rotulo.textContent = "Link copiado";
+  clearTimeout(btn._t); btn._t = setTimeout(() => { btn.classList.remove("ok"); rotulo.textContent = podeCompartilhar() ? "Compartilhar" : "Copiar link"; }, 2200);
 }
 
 function renderTable() {
   const e = state.selected;
   let rows = e.s.map((s, i) => ({ s, i }));
-  if (state.unit) rows = rows.filter((r) => r.s[S.U] === state.unit);
+  if (unitAtivo()) rows = rows.filter((r) => unitMatch(r.s, r.i));
   const k = state.sort.k, dir = state.sort.dir;
   const val = { d: (s) => s[S.D], u: (s) => s[S.U], a: (s) => s[S.A], v: (s) => s[S.V], m: (s) => clean(s) ? s[S.V] / s[S.A] : -1 }[k];
   rows.sort((a, b) => { const x = val(a.s), y = val(b.s); return (x > y ? 1 : x < y ? -1 : 0) * dir; });
@@ -655,7 +921,7 @@ function renderTable() {
   $("#tbl tbody").onclick = (ev) => {
     const tr = ev.target.closest("tr[data-i]"); if (!tr) return;
     const u = state.selected.s[+tr.dataset.i][S.U]; if (!u) return;
-    state.unit = state.unit === u ? "" : u; $("#unitSel").value = state.unit; renderTable(); drawChart();
+    state.unit = state.unit === u ? "" : u; state.unitSql = ""; $("#unitSel").value = state.unit; renderTable(); drawChart(); renderRevendas();
   };
 }
 
@@ -691,8 +957,8 @@ function drawChart() {
       <text x="${m.l - 6}" y="${Y(v) + 3.5}" text-anchor="end">${v >= 1000 ? (v / 1000).toLocaleString("pt-BR") + " mil" : v}</text>`).join("")}
     ${xt.map((y) => `<text x="${X(y)}" y="${H - 6}" text-anchor="middle">${y}</text>`).join("")}
     ${sm.length > 1 ? `<path d="${line(sm)}" fill="none" stroke="var(--muted)" stroke-width="1.6" stroke-dasharray="4 3"/>` : ""}
-    <g>${chartPts.map((p) => `<circle data-i="${p.i}" cx="${p.px.toFixed(1)}" cy="${p.py.toFixed(1)}" r="${state.unit && p.s[S.U] === state.unit ? 5 : 3.4}"
-      fill="${accent}" fill-opacity="${state.unit ? (p.s[S.U] === state.unit ? 1 : 0.15) : 0.55}" stroke="var(--panel)" stroke-width="1"/>`).join("")}</g>
+    <g>${chartPts.map((p) => `<circle data-i="${p.i}" cx="${p.px.toFixed(1)}" cy="${p.py.toFixed(1)}" r="${unitAtivo() && unitMatch(p.s, p.i) ? 5 : 3.4}"
+      fill="${accent}" fill-opacity="${unitAtivo() ? (unitMatch(p.s, p.i) ? 1 : 0.15) : 0.55}" stroke="var(--panel)" stroke-width="1"/>`).join("")}</g>
     ${ann.length > 1 ? `<path d="${line(ann)}" fill="none" stroke="var(--fg)" stroke-width="2" stroke-linejoin="round"/>` : ""}
     ${ann.map((d) => `<circle cx="${X(d.y + 0.5)}" cy="${Y(d.m)}" r="3" fill="var(--fg)" stroke="var(--panel)" stroke-width="1.5"/>`).join("")}
     <circle id="hov" r="6" fill="none" stroke="var(--select)" stroke-width="2.5" visibility="hidden"/>
@@ -715,7 +981,7 @@ function drawChart() {
   hit.addEventListener("pointerleave", () => show(null));
   hit.addEventListener("click", (ev) => {
     const r = svg.getBoundingClientRect(), k = W / r.width; const p = near((ev.clientX - r.left) * k, (ev.clientY - r.top) * k);
-    if (p && p.s[S.U]) { state.unit = state.unit === p.s[S.U] ? "" : p.s[S.U]; $("#unitSel").value = state.unit; renderTable(); drawChart(); }
+    if (p && p.s[S.U]) { state.unit = state.unit === p.s[S.U] ? "" : p.s[S.U]; state.unitSql = ""; $("#unitSel").value = state.unit; renderTable(); drawChart(); renderRevendas(); }
   });
   state._show = show;
 }

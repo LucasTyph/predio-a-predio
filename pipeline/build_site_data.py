@@ -220,11 +220,31 @@ def main():
     corte_recente = hoje - pd.DateOffset(years=3)
     quadra_stats = {}
 
+    ipca_f, ipca_ref = fatores_ipca()
+    corte_antigo = (int((hoje - pd.DateOffset(years=8)).strftime("%Y%m%d")),
+                    int((hoje - pd.DateOffset(years=5)).strftime("%Y%m%d")))
+    camadas_q = {}
+
     cols = ["sql", "setor", "quadra", "lote", "num", "logradouro", "bairro", "referencia", "cep",
             "complemento", "data", "valor", "area_construida", "nat", "fin", "valor_financiado",
             "proporcao", "venal_ref", "uso", "padrao", "acc", "planta", "m2", "bkey"]
     df["dnum"] = df["data"].dt.strftime("%Y%m%d").astype(int)
     corte = int(corte_recente.strftime("%Y%m%d"))
+
+    def indicadores(rows, minimo):
+        """Valorização real em 5 anos, vendas por ano e % financiado, a partir das vendas."""
+        out = {}
+        real = lambda r: r["m2"] * ipca_f.get(r["dnum"] // 100, 1.0)  # noqa: E731
+        rec = [real(r) for r in rows if r["dnum"] >= corte and not math.isnan(r["m2"])]
+        ant = [real(r) for r in rows if corte_antigo[0] <= r["dnum"] < corte_antigo[1] and not math.isnan(r["m2"])]
+        if len(rec) >= minimo and len(ant) >= minimo:
+            out["val"] = round((float(np.median(rec)) / float(np.median(ant)) - 1) * 100)
+        cv = [r for r in rows if r["nat"] == 1 and r["dnum"] >= corte]
+        if cv:
+            out["vol"] = round(len(cv) / 3, 1)
+        if len(cv) >= minimo:
+            out["fin"] = round(100 * sum(1 for r in cv if r["fin"] > 0) / len(cv))
+        return out
     nz = lambda v, d=0: d if v is None or (isinstance(v, float) and math.isnan(v)) else v  # noqa: E731
 
     for setor, ds in df.groupby("setor", sort=True):
@@ -236,8 +256,11 @@ def main():
         loc = localiza([(k, {"lote": {r["lote"] for r in g}}) for k, g in grupos.items()], lotes, quadra_cent)
         edificios = []
         qvals = {}
+        qrows = {}
+        qacc = {}
         for key, g in grupos.items():
             _, quadra, _, num = key
+            qrows.setdefault(quadra, []).extend(g)
             for r in g:
                 if r["dnum"] >= corte and not math.isnan(r["m2"]):
                     qvals.setdefault(quadra, []).append(r["m2"])
@@ -254,6 +277,9 @@ def main():
             med_rec = float(np.median(rec)) if rec else None
             accs = [int(r["acc"]) for r in g if nz(r["acc"]) > 1800]
             acc = Counter(accs).most_common(1)[0][0] if accs else None
+            if acc:
+                qacc.setdefault(quadra, []).append(acc)
+            ind = indicadores(g, 3)
             nome = nome_edificio([r["referencia"] for r in g], [r["bairro"] for r in g])
             logr = moda([r["logradouro"] for r in g])
             bairro = moda([r["bairro"] for r in g if not re.search(r"\b(ED|COND|AP|BL)\b", r["bairro"])])
@@ -276,11 +302,17 @@ def main():
                           1 if vert else 0, round(med_rec) if med_rec else None])
             m2p = round(med_rec) if med_rec else None
             tiles.write(feature({"type": "Point", "coordinates": [round_coord(lon), round_coord(lat)]},
-                                {"id": bid, "s": setor, "n": len(g), **({"m2": m2p} if m2p else {})}, "edificios"))
+                                {"id": bid, "s": setor, "n": len(g), "v": 1 if vert else 0,
+                                 **({"m2": m2p} if m2p else {}), **({"acc": acc} if acc else {}), **ind}, "edificios"))
             if poly:
                 tiles.write(feature({"type": "Polygon", "coordinates": [poly]}, {"id": bid}, "lotes"))
         for q, v in qvals.items():
             quadra_stats[(setor, q)] = (float(np.median(v)), len(v))
+        for q, rows in qrows.items():
+            ind = indicadores(rows, 5)
+            if qacc.get(q):
+                ind["acc"] = int(np.median(qacc[q]))
+            camadas_q[(setor, q)] = ind
         size = gz_json(OUT / "setor" / f"{setor}.json.gz", {"setor": setor, "ed": edificios})
         print(f"setor {setor}: {len(edificios)} edificios, {len(ds)} vendas, {size/1e6:.1f} MB", flush=True)
 
@@ -295,6 +327,7 @@ def main():
         props = {"s": k[0], "q": k[1]}
         if st:
             props.update({"m2": round(st[0]), "n": st[1]})
+        props.update(camadas_q.get(k, {}))
         tiles.write(feature(f["geometry"], props, "quadras"))
 
     # ruas (só para os rótulos): avenidas e vias principais numa camada, demais ruas em outra
@@ -338,25 +371,33 @@ def main():
             breaks.append(n)
     while len(breaks) < 6:
         breaks.append(breaks[-1] + 1000)
+    vols = sorted(v["vol"] for v in camadas_q.values() if "vol" in v)
+    bvol = []
+    for i in range(1, 7):
+        v = vols[len(vols) * i // 7]
+        n = round(v * 2) / 2 if v < 5 else round(v)
+        if not bvol or n > bvol[-1]:
+            bvol.append(n)
+    while len(bvol) < 6:
+        bvol.append(bvol[-1] * 2)
+    camadas = {
+        "m2": {"titulo": "R$/m² mediano, últimos 3 anos", "breaks": breaks, "fmt": "k", "tipo": "seq"},
+        "val": {"titulo": "Variação real do R$/m² em 5 anos", "breaks": [-20, -10, -3, 3, 10, 20], "fmt": "pct", "tipo": "div"},
+        "vol": {"titulo": "Vendas por ano, últimos 3 anos", "breaks": bvol, "fmt": "num", "tipo": "seq"},
+        "fin": {"titulo": "Vendas com financiamento, últimos 3 anos", "breaks": [10, 20, 30, 40, 50, 60], "fmt": "pct0", "tipo": "seq"},
+        "acc": {"titulo": "Ano de construção (mediana)", "breaks": [1965, 1980, 1990, 2000, 2010, 2018], "fmt": "ano", "tipo": "seq"},
+    }
 
-    # IPCA (índice acumulado mensal, base = último mês)
-    ipca = json.load(open(VENDOR / "ipca.json", encoding="utf-8"))
-    idx = []
-    acc = 1.0
-    for row in ipca:
-        d, m, y = row["data"].split("/")
-        acc *= 1 + float(row["valor"]) / 100
-        idx.append([int(y) * 100 + int(m), acc])
-    ultimo = idx[-1][1]
     top = sorted((r for r in busca if r[8] and re.search(r"TATUAP", f"{r[6]} {r[4]}")), key=lambda r: -r[7])[:8]
     meta = {
         "breaks": breaks,
+        "camadas": camadas,
         "destaques": top,
         "atualizado": date.today().isoformat(),
         "ultima_venda": hoje.strftime("%Y-%m-%d"),
         "primeira_venda": df["data"].min().strftime("%Y-%m-%d"),
-        "ipca_ref": idx[-1][0],
-        "ipca": {str(k): round(ultimo / v, 5) for k, v in idx},
+        "ipca_ref": ipca_ref,
+        "ipca": {str(k): round(v, 5) for k, v in ipca_f.items()},
         "n_vendas": int(len(df)),
         "n_edificios": int(total_ok),
     }
@@ -367,6 +408,19 @@ def main():
 
 METRO_CORES = {"AZUL": "#0455a1", "VERDE": "#007e5e", "VERMELHA": "#ee372f", "AMARELA": "#ffd400",
                "LILÁS": "#9b3894", "LILAS": "#9b3894", "PRATA": "#9e9e9e", "OURO": "#c9a227", "LARANJA": "#f68b1f"}
+
+
+def fatores_ipca():
+    """{AAAAMM: fator que leva um valor daquele mês para reais do último mês do IPCA}."""
+    ipca = json.load(open(VENDOR / "ipca.json", encoding="utf-8"))
+    idx = []
+    acc = 1.0
+    for row in ipca:
+        d, m, y = row["data"].split("/")
+        acc *= 1 + float(row["valor"]) / 100
+        idx.append((int(y) * 100 + int(m), acc))
+    ultimo = idx[-1][1]
+    return {k: ultimo / v for k, v in idx}, idx[-1][0]
 
 
 def feature(geom, props, layer):

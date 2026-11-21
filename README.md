@@ -35,6 +35,7 @@ Passos do pipeline, na ordem (`atualizar.py` chama todos):
 | `parse_itbi.py` | Junta as planilhas numa tabela só (`data/interim/itbi.parquet`) |
 | `build_site_data.py` | Agrupa as vendas por edifício: `site/data/setor/` (vendas), `site/data/busca/` (índice de busca) e as camadas do mapa em `data/tiles_src/` |
 | `build_tiles.py` | Gera o mapa em tiles vetoriais (`site/tiles/mapa.pmtiles`) com o tippecanoe |
+| `build_og.py` | Gera a imagem de prévia para links compartilhados (`site/og.jpg`) |
 | `build_pages.py` | Monta `dist/` para o GitHub Pages |
 
 `site/index.html` é a página inteira (mapa em MapLibre, sem servidor); `build_pages.py` acrescenta o esqueleto HTML.
@@ -50,6 +51,13 @@ Passos do pipeline, na ordem (`atualizar.py` chama todos):
 - Cada linha do ITBI tem o SQL do imóvel (setor, quadra, lote, dígito). As unidades de um condomínio têm SQLs diferentes, mas compartilham o endereço.
 - O edifício é o par logradouro + número dentro da quadra fiscal. Isso também agrupa as vendas na planta, feitas no SQL do terreno antes da individualização.
 - A posição vem do lote do GeoSampa com o mesmo número na mesma quadra (preferindo o lote de condomínio). Casas sem número casado usam o próprio SQL. O que sobra fica no centro da quadra e aparece como "posição aproximada" (cerca de 4%).
+
+## O que o site mostra
+
+- **Mapa:** a cor das quadras e dos pontos pode mostrar o R$/m² mediano (3 anos), a variação real do R$/m² em 5 anos, as vendas por ano, a % de vendas financiadas ou o ano de construção. Os pontos podem ser filtrados por tipo (apartamento ou casa), ano de construção e vendas recentes. Os indicadores são calculados em `build_site_data.py` e vão como atributos nos tiles; as faixas de cor ficam em `meta.json`.
+- **Ficha do prédio:** gráfico do R$/m² (nominal ou corrigido pelo IPCA), todas as transações e as **revendas da mesma unidade** (mesmo cadastro de IPTU comprado e vendido de novo, com a variação acima da inflação). Compras na planta entram quando o número do apartamento e o bloco identificam uma única unidade. O cálculo das revendas é feito no navegador, a partir do arquivo do setor.
+- **Links:** cada prédio tem um endereço próprio (`#ed-setor-id`), com ID derivado do endereço, que não muda entre atualizações. O botão "Copiar link" copia esse endereço; no celular ele abre o menu de compartilhar.
+- **Prévia ao compartilhar:** `build_pages.py` põe as tags Open Graph no `<head>` com a imagem `og.jpg`. O endereço público vem de `SITE_URL`, que o workflow preenche. O WhatsApp só vê a página inicial (a parte depois do `#` não chega ao servidor), então a prévia é a mesma para qualquer prédio.
 
 ## Filtros de preço
 

@@ -17,6 +17,7 @@ STEPS = [
     ["parse_itbi.py"],
     ["build_site_data.py"],
     ["build_tiles.py"],
+    ["build_og.py"],
 ]
 
 
