@@ -4,6 +4,19 @@ Histórico de vendas residenciais da cidade de São Paulo, edifício por edifíc
 
 Fontes: guias de ITBI pagas (Secretaria Municipal da Fazenda), lotes, quadras, ruas, distritos e metrô do GeoSampa, e IPCA do Banco Central.
 
+Site: https://lucastyph.github.io/predio-a-predio/
+
+## In English
+
+**Prédio a Prédio** ("building by building") is a map of every residential sale recorded in the city of São Paulo since 2005, grouped by building. Search an address or click a building to see each sale: what was paid, the price per m² over time, and resales of the same apartment adjusted for inflation.
+
+- **Data:** São Paulo's real estate transfer tax records (*ITBI*, about 2 million residential sales), parcel and block geometry from the city's GeoSampa portal, and the IPCA inflation index from Brazil's Central Bank. All sources are public; the records contain no buyer or seller names.
+- **How it works:** Python scripts in `pipeline/` download the sources, group sales into buildings by address, and produce a static site. The map is a vector tile archive (PMTiles, built with tippecanoe), so browsers only download the visible area. No server or database is needed.
+- **Updates:** a GitHub Actions workflow rebuilds everything on the 10th of each month and deploys it to GitHub Pages. No data is stored in the repository.
+- **Run locally:** `pip install -r requirements.txt`, then `python -I pipeline/atualizar.py --pages` and `python -I pipeline/serve.py` (http://localhost:8765). The tile step needs tippecanoe 2.x.
+
+Prices use the value declared on the tax form and the floor area from the property tax (IPTU) register, which includes a share of common areas, so price per m² runs lower than in listings. The rest of this README, the code comments and the site are in Portuguese.
+
 ## Atualização automática
 
 O workflow [`.github/workflows/atualizar.yml`](.github/workflows/atualizar.yml) roda todo dia 10 (e a cada push que mexe no site ou no pipeline). Ele baixa tudo de novo, processa e publica no GitHub Pages. Para rodar na hora: aba **Actions** → **Atualizar dados e publicar** → **Run workflow**.
